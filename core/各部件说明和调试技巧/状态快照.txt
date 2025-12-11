@@ -1,0 +1,7 @@
+在onBoardUpdate中打印完整状态
+
+
+gameCore.onBoardUpdate((state) => {
+  console.log('GameState:', JSON.stringify(state, null, 2));
+  // ...
+});

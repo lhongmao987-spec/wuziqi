@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 首页</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/lucide.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(180deg, #020617 0%, #0F172A 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        .card {
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #07C160;
+        }
+        .user-meta {
+            flex: 1;
+        }
+        .nickname {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .record {
+            font-size: 14px;
+            color: #94A3B8;
+        }
+        .mode-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .mode-card {
+            background-color: #2D3748;
+            border-radius: 12px;
+            padding: 20px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .mode-card.primary {
+            background-color: #07C160;
+            color: white;
+        }
+        .mode-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        .mode-icon {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .mode-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .mode-desc {
+            font-size: 12px;
+            color: #94A3B8;
+        }
+        .mode-card.primary .mode-desc {
+            color: rgba(255,255,255,0.8);
+        }
+        .difficulty {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .diff-btn {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+            cursor: pointer;
+        }
+        .diff-btn.active {
+            background-color: white;
+            color: #07C160;
+            font-weight: 500;
+        }
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            border-radius: 12px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .btn-primary {
+            background-color: #07C160;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #06AA55;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(7,193,96,0.3);
+        }
+        .btn-secondary {
+            background-color: transparent;
+            color: #07C160;
+            border: 1px solid #07C160;
+        }
+        .btn-secondary:hover {
+            background-color: rgba(7,193,96,0.1);
+            transform: translateY(-2px);
+        }
+        .bottom-links {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 16px;
+        }
+        .link {
+            font-size: 14px;
+            color: #94A3B8;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .link:hover {
+            color: #07C160;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="user-info">
+            <img src="https://picsum.photos/id/64/200/200" alt="用户头像" class="avatar">
+            <div class="user-meta">
+                <div class="nickname">棋艺新手</div>
+                <div class="record">共 128 局 · 胜率 61%</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="mode-grid">
+            <div class="mode-card primary" onclick="navigateTo('game.html')">
+                <i class="mode-icon" data-lucide="user"></i>
+                <div class="mode-title">人机对战</div>
+                <div class="mode-desc">挑战AI对手</div>
+                <div class="difficulty">
+                    <div class="diff-btn">初级</div>
+                    <div class="diff-btn active">中级</div>
+                    <div class="diff-btn">高级</div>
+                </div>
+            </div>
+            <div class="mode-card">
+                <i class="mode-icon" data-lucide="users"></i>
+                <div class="mode-title">好友对战</div>
+                <div class="mode-desc">邀请好友开局</div>
+            </div>
+            <div class="mode-card full-width">
+                <i class="mode-icon" data-lucide="trophy"></i>
+                <div class="mode-title">排行榜</div>
+                <div class="mode-desc">查看全服高手</div>
+            </div>
+        </div>
+    </div>
+
+    <button class="btn btn-primary" onclick="navigateTo('game.html')">
+        快速开始
+    </button>
+
+    <div class="bottom-links">
+        <div class="link" onclick="navigateTo('settings.html')">游戏规则</div>
+        <div class="link" onclick="navigateTo('settings.html')">设置</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/umd/lucide.min.js"></script>
+    <script>
+        function navigateTo(page) {
+            try {
+                const parentDoc = window.parent?.document;
+                const target = parentDoc?.querySelector(`[data-page="${page}"]`);
+                if (target) {
+                    target.click();
+                    return;
+                }
+            } catch (err) {
+                // ignore cross-origin issues, fallback below
+            }
+            window.location.href = page;
+        }
+
+        // 难度选择交互
+        const diffBtns = document.querySelectorAll('.diff-btn');
+        diffBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                diffBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 设置与规则</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/lucide.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0F172A;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .page-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #1F2933;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-icon:hover {
+            background-color: #2D3748;
+            transform: scale(1.05);
+        }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 4px;
+        }
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #94A3B8;
+        }
+        .tab.active {
+            background-color: #07C160;
+            color: white;
+        }
+        .content-container {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+        .settings-section {
+            margin-bottom: 24px;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #E2E8F0;
+        }
+        .section-title i {
+            color: #07C160;
+        }
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+        }
+        .setting-item:hover {
+            background-color: #2D3748;
+        }
+        .setting-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .setting-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background-color: rgba(7,193,96,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #07C160;
+        }
+        .setting-text {
+            display: flex;
+            flex-direction: column;
+        }
+        .setting-name {
+            font-size: 15px;
+            font-weight: 500;
+            color: #F8FAFC;
+        }
+        .setting-desc {
+            font-size: 12px;
+            color: #94A3B8;
+            margin-top: 2px;
+        }
+        /* 开关样式 */
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 28px;
+            background-color: #374151;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .toggle-switch.active {
+            background-color: #07C160;
+        }
+        .toggle-slider {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 24px;
+            height: 24px;
+            background-color: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(22px);
+        }
+        /* 选择框样式 */
+        .setting-select {
+            background-color: #2D3748;
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            cursor: pointer;
+        }
+        .setting-select option {
+            background-color: #1F2933;
+            color: white;
+        }
+        /* 规则页面样式 */
+        .rule-card {
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .rule-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #07C160;
+        }
+        .rule-content {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #E2E8F0;
+        }
+        .rule-list {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        .rule-list li {
+            margin-bottom: 8px;
+        }
+        .rule-note {
+            background-color: rgba(7,193,96,0.1);
+            border-left: 3px solid #07C160;
+            padding: 12px;
+            border-radius: 0 8px 8px 0;
+            margin-top: 12px;
+            font-size: 13px;
+            color: #CBD5E1;
+        }
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background-color: #1F2933;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .contact-item:hover {
+            background-color: #2D3748;
+        }
+        .contact-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background-color: rgba(7,193,96,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #07C160;
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="btn-icon" onclick="window.parent.document.querySelector('[data-page=home.html]').click()">
+            <i class="lucide lucide-arrow-left"></i>
+        </div>
+        <div class="page-title">设置与规则</div>
+        <div class="btn-icon">
+            <i class="lucide lucide-help-circle"></i>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active">设置</div>
+        <div class="tab">游戏规则</div>
+        <div class="tab">关于我们</div>
+    </div>
+
+    <div class="content-container">
+        <!-- 设置标签页内容 -->
+        <div id="settings-tab" class="tab-content">
+            <div class="settings-section">
+                <div class="section-title">
+                    <i class="lucide lucide-volume-2"></i> 音效设置
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-music"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">背景音乐</div>
+                            <div class="setting-desc">开启/关闭游戏背景音乐</div>
+                        </div>
+                    </div>
+                    <div class="toggle-switch active">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-volume-2"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">音效</div>
+                            <div class="setting-desc">落子、胜利等操作音效</div>
+                        </div>
+                    </div>
+                    <div class="toggle-switch active">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title">
+                    <i class="lucide lucide-settings"></i> 游戏设置
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-clock"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">对局计时</div>
+                            <div class="setting-desc">开启后每步棋有时间限制</div>
+                        </div>
+                    </div>
+                    <div class="toggle-switch">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-alert-circle"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">提示功能</div>
+                            <div class="setting-desc">显示最佳落子位置提示</div>
+                        </div>
+                    </div>
+                    <div class="toggle-switch">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-palette"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">棋盘主题</div>
+                            <div class="setting-desc">选择棋盘和棋子的显示样式</div>
+                        </div>
+                    </div>
+                    <select class="setting-select">
+                        <option>经典木纹</option>
+                        <option>简约黑白</option>
+                        <option>水墨风格</option>
+                        <option>现代科技</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-refresh-cw"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">悔棋次数</div>
+                            <div class="setting-desc">每局允许的悔棋次数</div>
+                        </div>
+                    </div>
+                    <select class="setting-select">
+                        <option>无限制</option>
+                        <option selected>3次</option>
+                        <option>1次</option>
+                        <option>禁止悔棋</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title">
+                    <i class="lucide lucide-user"></i> 账号设置
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-shield"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">隐私设置</div>
+                            <div class="setting-desc">控制个人信息展示范围</div>
+                        </div>
+                    </div>
+                    <i class="lucide lucide-chevron-right" style="color: #94A3B8;"></i>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-cloud"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">数据同步</div>
+                            <div class="setting-desc">同步对局记录到云端</div>
+                        </div>
+                    </div>
+                    <div class="toggle-switch active">
+                        <div class="toggle-slider"></div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-icon">
+                            <i class="lucide lucide-log-out"></i>
+                        </div>
+                        <div class="setting-text">
+                            <div class="setting-name">退出登录</div>
+                            <div class="setting-desc">退出当前微信账号</div>
+                        </div>
+                    </div>
+                    <i class="lucide lucide-chevron-right" style="color: #94A3B8;"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- 规则标签页内容 (默认隐藏) -->
+        <div id="rules-tab" class="tab-content" style="display: none;">
+            <div class="rule-card">
+                <div class="rule-title">基本规则</div>
+                <div class="rule-content">
+                    五子棋是一种两人对弈的纯策略型棋类游戏，使用黑白两色的棋子，下在棋盘直线与横线的交叉点上，先形成五子连线者获胜。
+                    <ul class="rule-list">
+                        <li>对局双方分别使用黑色和白色棋子，黑方先行</li>
+                        <li>棋子落在棋盘的交叉点上，落子后不能移动或拿掉</li>
+                        <li>率先在棋盘上形成横向、竖向、斜向的连续五个同色棋子者获胜</li>
+                        <li>如果棋盘下满仍无人连成五子，则为和局</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="rule-card">
+                <div class="rule-title">禁手规则</div>
+                <div class="rule-content">
+                    为了平衡黑方先行的优势，专业比赛中对黑方有禁手限制：
+                    <ul class="rule-list">
+                        <li><strong>三三禁手</strong>：黑方一子落下同时形成两个或两个以上的活三</li>
+                        <li><strong>四四禁手</strong>：黑方一子落下同时形成两个或两个以上的活四</li>
+                        <li><strong>长连禁手</strong>：黑方一子落下形成六个或更多同色棋子的连线</li>
+                    </ul>
+                    <div class="rule-note">
+                        提示：本游戏中，初级模式关闭禁手规则，中级和高级模式开启禁手规则。
+                    </div>
+                </div>
+            </div>
+
+            <div class="rule-card">
+                <div class="rule-title">对局礼仪</div>
+                <div class="rule-content">
+                    <ul class="rule-list">
+                        <li>落子无悔：除特殊情况（如网络问题）外，不建议频繁悔棋</li>
+                        <li>尊重对手：保持良好的游戏心态，不使用不文明语言</li>
+                        <li>合理用时：在计时模式下，尽量快速思考，不故意拖延时间</li>
+                        <li>认输规则：当明显无法获胜时，可主动认输，尊重对手的时间</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="rule-card">
+                <div class="rule-title">进阶技巧</div>
+                <div class="rule-content">
+                    <ul class="rule-list">
+                        <li><strong>活二</strong>：两个棋子中间有空位，可发展为活三</li>
+                        <li><strong>活三</strong>：三个棋子两端都有空位，可发展为活四</li>
+                        <li><strong>活四</strong>：四个棋子两端都有空位，下一步即可成五</li>
+                        <li><strong>冲四</strong>：四个棋子只有一端有空位，需要防守</li>
+                    </ul>
+                    <div class="rule-note">
+                        提示：防守优先于进攻，同时要注意创造双活三、双活四等进攻机会。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 关于我们标签页内容 (默认隐藏) -->
+        <div id="about-tab" class="tab-content" style="display: none;">
+            <div class="rule-card">
+                <div class="rule-title">关于五子棋小程序</div>
+                <div class="rule-content">
+                    本五子棋小程序致力于为用户提供简洁、流畅、高品质的五子棋对弈体验。我们融合了传统五子棋的经典玩法与现代移动应用的交互设计，让您随时随地享受五子棋的乐趣。
+                    <br><br>
+                    <strong>版本信息：</strong> v1.0.0
+                    <br>
+                    <strong>更新时间：</strong> 2025年1月1日
+                </div>
+            </div>
+
+            <div class="rule-card">
+                <div class="rule-title">联系我们</div>
+                <div class="rule-content">
+                    如果您在使用过程中有任何问题、建议或反馈，欢迎通过以下方式联系我们：
+                </div>
+                <div class="contact-item">
+                    <div class="contact-icon">
+                        <i class="lucide lucide-mail"></i>
+                    </div>
+                    <div class="setting-text">
+                        <div class="setting-name">客服邮箱</div>
+                        <div class="setting-desc">support@wzqgame.com</div>
+                    </div>
+                </div>
+                <div class="contact-item">
+                    <div class="contact-icon">
+                        <i class="lucide lucide-wechat"></i>
+                    </div>
+                    <div class="setting-text">
+                        <div class="setting-name">官方微信</div>
+                        <div class="setting-desc">五子棋爱好者联盟</div>
+                    </div>
+                </div>
+                <div class="contact-item">
+                    <div class="contact-icon">
+                        <i class="lucide lucide-message-square"></i>
+                    </div>
+                    <div class="setting-text">
+                        <div class="setting-name">意见反馈</div>
+                        <div class="setting-desc">提交您的宝贵建议</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rule-card">
+                <div class="rule-title">用户协议与隐私政策</div>
+                <div class="rule-content">
+                    使用本小程序即表示您同意我们的用户协议和隐私政策。我们承诺保护您的个人信息安全，不会向第三方泄露您的隐私数据。
+                    <div class="rule-note">
+                        提示：您可以在设置中管理您的隐私权限，控制个人信息的展示范围。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 标签切换逻辑
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = [
+            document.getElementById('settings-tab'),
+            document.getElementById('rules-tab'),
+            document.getElementById('about-tab')
+        ];
+
+        tabs.forEach((tab, index) => {
+            tab.addEventListener('click', () => {
+                // 切换标签激活状态
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // 切换内容显示
+                tabContents.forEach(content => {
+                    content.style.display = 'none';
+                });
+                tabContents[index].style.display = 'block';
+            });
+        });
+
+        // 开关切换逻辑
+        const toggleSwitches = document.querySelectorAll('.toggle-switch');
+        toggleSwitches.forEach(toggle => {
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('active');
+            });
+        });
+    </script>
+</body>
+</html>

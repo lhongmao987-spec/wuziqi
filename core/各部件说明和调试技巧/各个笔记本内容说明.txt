@@ -1,0 +1,5 @@
+/core
+├── types.ts          # 所有类型定义（推荐先创建）
+├── ruleEngine.ts     # 规则引擎（核心依赖）
+├── aiEngine.ts       # AI引擎（依赖ruleEngine）
+└── gameCore.ts       # 游戏主控制器（最终入口）

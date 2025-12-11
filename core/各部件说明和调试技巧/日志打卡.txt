@@ -1,0 +1,5 @@
+在GameCore关键节点添加console.log
+
+
+console.log(`[GameCore] Player ${player} move to (${x}, ${y})`);
+console.log(`[RuleEngine] Judgment:`, judgment);

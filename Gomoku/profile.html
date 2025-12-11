@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 个人战绩</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/lucide.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0F172A;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .page-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #1F2933;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-icon:hover {
+            background-color: #2D3748;
+            transform: scale(1.05);
+        }
+        .profile-card {
+            background-color: #1F2933;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .profile-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #07C160;
+            margin: 0 auto 12px;
+        }
+        .profile-name {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .profile-id {
+            font-size: 14px;
+            color: #94A3B8;
+            margin-bottom: 12px;
+        }
+        .profile-rank {
+            display: inline-block;
+            background-color: rgba(7,193,96,0.1);
+            color: #07C160;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid #07C160;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .stat-card {
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 16px 8px;
+            text-align: center;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+        }
+        .stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: #07C160;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #94A3B8;
+        }
+        .win-rate-card {
+            background-color: #1F2933;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .win-rate-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .win-rate-title {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .win-rate-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #07C160;
+        }
+        .progress-bar {
+            height: 8px;
+            background-color: #2D3748;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #07C160;
+            border-radius: 4px;
+            width: 61%;
+        }
+        .progress-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #94A3B8;
+        }
+        .mode-stats {
+            background-color: #1F2933;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .mode-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .mode-title i {
+            color: #07C160;
+        }
+        .mode-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .mode-item {
+            background-color: #2D3748;
+            border-radius: 12px;
+            padding: 16px;
+            transition: transform 0.2s;
+        }
+        .mode-item:hover {
+            transform: translateY(-2px);
+            background-color: #374151;
+        }
+        .mode-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .mode-stats-detail {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #94A3B8;
+        }
+        .recent-games {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+        .recent-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .recent-title i {
+            color: #07C160;
+        }
+        .game-item {
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+        .game-item:hover {
+            transform: translateX(4px);
+            background-color: #2D3748;
+        }
+        .opponent-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-right: 12px;
+        }
+        .game-info {
+            flex: 1;
+        }
+        .opponent-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .game-meta {
+            font-size: 12px;
+            color: #94A3B8;
+            display: flex;
+            gap: 12px;
+        }
+        .game-result {
+            font-size: 14px;
+            font-weight: 500;
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
+        .result-win {
+            background-color: rgba(22,163,74,0.1);
+            color: #16A34A;
+        }
+        .result-lose {
+            background-color: rgba(239,68,68,0.1);
+            color: #EF4444;
+        }
+        .result-draw {
+            background-color: rgba(100,116,139,0.1);
+            color: #64748B;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="btn-icon" onclick="window.parent.document.querySelector('[data-page=home.html]').click()">
+            <<i class="lucide lucide-arrow-left"></</i>
+        </div>
+        <div class="page-title">个人战绩</div>
+        <div class="btn-icon">
+            <<i class="lucide lucide-edit"></</i>
+        </div>
+    </div>
+
+    <div class="profile-card">
+        <img src="https://picsum.photos/id/64/200/200" alt="个人头像" class="profile-avatar">
+        <div class="profile-name">棋艺新手</div>
+        <div class="profile-id">ID: 87654321</div>
+        <div class="profile-rank">
+            <<i class="lucide lucide-trophy"></</i> 业余3段
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">128</div>
+            <div class="stat-label">总对局</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">78</div>
+            <div class="stat-label">胜场</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">42</div>
+            <div class="stat-label">负场</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">8</div>
+            <div class="stat-label">平局</div>
+        </div>
+    </div>
+
+    <div class="win-rate-card">
+        <div class="win-rate-header">
+            <div class="win-rate-title">胜率</div>
+            <div class="win-rate-value">61%</div>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill"></div>
+        </div>
+        <div class="progress-labels">
+            <span>0%</span>
+            <span>50%</span>
+            <span>100%</span>
+        </div>
+    </div>
+
+    <div class="mode-stats">
+        <div class="mode-title">
+            <<i class="lucide lucide-gamepad-2"></</i> 模式统计
+        </div>
+        <div class="mode-list">
+            <div class="mode-item">
+                <div class="mode-name">
+                    <<i class="lucide lucide-user"></</i> 人机对战
+                </div>
+                <div class="mode-stats-detail">
+                    <span>52 局</span>
+                    <span>胜率 73%</span>
+                </div>
+            </div>
+            <div class="mode-item">
+                <div class="mode-name">
+                    <<i class="lucide lucide-users"></</i> 好友对战
+                </div>
+                <div class="mode-stats-detail">
+                    <span>48 局</span>
+                    <span>胜率 54%</span>
+                </div>
+            </div>
+            <div class="mode-item">
+                <div class="mode-name">
+                    <<i class="lucide lucide-mobile"></</i> 本机双人
+                </div>
+                <div class="mode-stats-detail">
+                    <span>28 局</span>
+                    <span>胜率 46%</span>
+                </div>
+            </div>
+            <div class="mode-item">
+                <div class="mode-name">
+                    <<i class="lucide lucide-trophy"></</i> 排位赛
+                </div>
+                <div class="mode-stats-detail">
+                    <span>0 局</span>
+                    <span>胜率 --</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="recent-games">
+        <div class="recent-title">
+            <<i class="lucide lucide-history"></</i> 最近对局
+        </div>
+        
+        <div class="game-item">
+            <img src="https://picsum.photos/id/1/200/200" alt="对手头像" class="opponent-avatar">
+            <div class="game-info">
+                <div class="opponent-name">AI 对手 (中级)</div>
+                <div class="game-meta">
+                    <span>人机对战</span>
+                    <span>今天 09:32</span>
+                </div>
+            </div>
+            <div class="game-result result-win">胜利</div>
+        </div>
+
+        <div class="game-item">
+            <img src="https://picsum.photos/id/2/200/200" alt="对手头像" class="opponent-avatar">
+            <div class="game-info">
+                <div class="opponent-name">小李飞刀</div>
+                <div class="game-meta">
+                    <span>好友对战</span>
+                    <span>昨天 18:45</span>
+                </div>
+            </div>
+            <div class="game-result result-lose">失败</div>
+        </div>
+
+        <div class="game-item">
+            <img src="https://picsum.photos/id/3/200/200" alt="对手头像" class="opponent-avatar">
+            <div class="game-info">
+                <div class="opponent-name">隔壁老王</div>
+                <div class="game-meta">
+                    <span>好友对战</span>
+                    <span>昨天 15:20</span>
+                </div>
+            </div>
+            <div class="game-result result-win">胜利</div>
+        </div>
+
+        <div class="game-item">
+            <img src="https://picsum.photos/id/4/200/200" alt="对手头像" class="opponent-avatar">
+            <div class="game-info">
+                <div class="opponent-name">同桌的你</div>
+                <div class="game-meta">
+                    <span>本机双人</span>
+                    <span>06-12 20:18</span>
+                </div>
+            </div>
+            <div class="game-result result-draw">平局</div>
+        </div>
+    </div>
+</body>
+</html>

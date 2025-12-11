@@ -1,0 +1,7 @@
+{
+  "usingComponents": {
+    "board": "/components/board/index"
+  },
+  "navigationBarTitleText": "对局"
+}
+

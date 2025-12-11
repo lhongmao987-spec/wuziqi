@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 对局结果</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/lucide.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0F172A;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .result-card {
+            background-color: #1F2937;
+            border-radius: 20px;
+            padding: 30px 20px;
+            width: 100%;
+            max-width: 320px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .result-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(22,163,74,0.1) 0%, rgba(7,193,96,0.05) 100%);
+            z-index: 0;
+        }
+        .result-icon {
+            width: 80px;
+            height: 80px;
+            background-color: #16A34A;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            box-shadow: 0 4px 16px rgba(22,163,74,0.3);
+        }
+        .result-icon i {
+            font-size: 40px;
+            color: white;
+        }
+        .result-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #16A34A;
+        }
+        .result-subtitle {
+            font-size: 16px;
+            color: #94A3B8;
+            margin-bottom: 24px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #94A3B8;
+        }
+        .players对比 {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding: 0 20px;
+        }
+        .result-player {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .result-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #16A34A;
+        }
+        .result-player-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .result-player-role {
+            font-size: 12px;
+            color: #94A3B8;
+            background-color: #2D3748;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+        .vs {
+            font-size: 18px;
+            font-weight: 600;
+            color: #64748B;
+        }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+        }
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border-radius: 12px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .btn-primary {
+            background-color: #07C160;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #06AA55;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(7,193,96,0.3);
+        }
+        .btn-secondary {
+            background-color: #2D3748;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background-color: #374151;
+            transform: translateY(-2px);
+        }
+        .btn-share {
+            background-color: transparent;
+            color: #07C160;
+            border: 1px solid #07C160;
+        }
+        .btn-share:hover {
+            background-color: rgba(7,193,96,0.1);
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="result-card">
+        <div class="result-bg"></div>
+        <div style="position: relative; z-index: 1;">
+            <div class="result-icon">
+                <i data-lucide="trophy"></i>
+            </div>
+            <div class="result-title">你赢了！</div>
+            <div class="result-subtitle">恭喜你战胜 AI 中级对手</div>
+
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value">32</div>
+                    <div class="stat-label">总步数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">05:28</div>
+                    <div class="stat-label">对局时长</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">+1</div>
+                    <div class="stat-label">连胜</div>
+                </div>
+            </div>
+
+            <div class="players对比">
+                <div class="result-player">
+                    <img src="https://picsum.photos/id/64/200/200" alt="玩家头像" class="result-avatar">
+                    <div class="result-player-name">棋艺新手</div>
+                    <div class="result-player-role">黑棋 · 胜利</div>
+                </div>
+                <div class="vs">VS</div>
+                <div class="result-player">
+                    <img src="https://picsum.photos/id/1/200/200" alt="AI头像" class="result-avatar" style="border-color: #64748B;">
+                    <div class="result-player-name">AI 对手</div>
+                    <div class="result-player-role">白棋 · 失败</div>
+                </div>
+            </div>
+
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="window.parent.document.querySelector('[data-page=game.html]').click()">
+                    <i data-lucide="refresh-cw"></i> 再来一局
+                </button>
+                <button class="btn btn-secondary" onclick="window.parent.document.querySelector('[data-page=home.html]').click()">
+                    <i data-lucide="home"></i> 返回大厅
+                </button>
+            </div>
+
+            <button class="btn btn-share" style="margin-top: 12px; width: 100%;">
+                <i data-lucide="share-2"></i> 分享战绩
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/umd/lucide.min.js"></script>
+    <script>
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<view class="page">
+  <view class="top-bar">
+    <view class="btn-icon" bindtap="backHome">返回</view>
+    <view class="game-mode">{{modeLabel}}</view>
+    <view class="timer">{{timerDisplay}}</view>
+  </view>
+
+  <view class="player-info">
+    <view class="player">
+      <view class="player-meta">
+        <view class="player-name">你</view>
+        <view class="player-role">黑棋</view>
+      </view>
+      <view class="current-turn" wx:if="{{currentPlayer === players.Black}}">轮到你</view>
+    </view>
+    <view class="player">
+      <view class="player-meta" style="align-items: flex-end;">
+        <view class="player-name">{{opponentLabel}}</view>
+        <view class="player-role">白棋</view>
+      </view>
+      <view class="current-turn" wx:if="{{currentPlayer === players.White}}">对手思考中</view>
+    </view>
+  </view>
+
+  <view class="board-container">
+    <board
+      board="{{board}}"
+      grid-count="{{gridCount}}"
+      size="{{boardSizePx}}"
+      last-move="{{lastMove}}"
+      bind:celltap="handleCellTap"
+    />
+  </view>
+
+  <view class="bottom-actions">
+    <button class="action-btn btn-undo" bindtap="handleUndo">悔棋</button>
+    <button class="action-btn btn-resign" bindtap="handleResign">认输</button>
+  </view>
+</view>
+

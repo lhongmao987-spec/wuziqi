@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 对局页</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/lucide.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0F172A;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #1F2933;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-icon:hover {
+            background-color: #2D3748;
+            transform: scale(1.05);
+        }
+        .game-mode {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .timer {
+            font-size: 16px;
+            font-weight: 500;
+            color: #07C160;
+        }
+        .player-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+        .player {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .player-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+        .player-meta {
+            display: flex;
+            flex-direction: column;
+        }
+        .player-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .player-role {
+            font-size: 12px;
+            color: #94A3B8;
+        }
+        .current-turn {
+            background-color: #07C160;
+            color: white;
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+        .board-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            padding: 10px;
+        }
+        .board {
+            width: 100%;
+            max-width: 320px;
+            height: 320px;
+            background-color: #F5E6C8;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(15, 1fr);
+            grid-template-rows: repeat(15, 1fr);
+        }
+        .grid-line {
+            position: absolute;
+            background-color: #8B4513;
+        }
+        .horizontal {
+            width: 100%;
+            height: 1px;
+        }
+        .vertical {
+            height: 100%;
+            width: 1px;
+        }
+        .star-point {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background-color: #8B4513;
+            border-radius: 50%;
+        }
+        .stone {
+            position: absolute;
+            width: 70%;
+            height: 70%;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .stone:hover {
+            transform: translate(-50%, -50%) scale(1.05);
+        }
+        .stone.black {
+            background-color: #111111;
+        }
+        .stone.white {
+            background-color: #F9FAFB;
+            border: 1px solid #E5E7EB;
+        }
+        .stone.last {
+            box-shadow: 0 0 0 2px #07C160, 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .bottom-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .action-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 12px;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .btn-undo {
+            background-color: #1F2933;
+            color: white;
+        }
+        .btn-undo:hover {
+            background-color: #2D3748;
+        }
+        .btn-resign {
+            background-color: #EF4444;
+            color: white;
+        }
+        .btn-resign:hover {
+            background-color: #DC2626;
+        }
+        .btn-settings {
+            background-color: #1F2933;
+            color: white;
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            border-radius: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="btn-icon" onclick="window.parent.document.querySelector('[data-page=home.html]').click()">
+            <i data-lucide="arrow-left"></i>
+        </div>
+        <div class="game-mode">人机对战 - 中级</div>
+        <div class="timer">03:45</div>
+    </div>
+
+    <div class="player-info">
+        <div class="player">
+            <img src="https://picsum.photos/id/64/200/200" alt="玩家头像" class="player-avatar">
+            <div class="player-meta">
+                <div class="player-name">棋艺新手</div>
+                <div class="player-role">黑棋</div>
+            </div>
+            <div class="current-turn">轮到你落子</div>
+        </div>
+        <div class="player">
+            <div class="player-meta" style="align-items: flex-end;">
+                <div class="player-name">AI 对手</div>
+                <div class="player-role">白棋</div>
+            </div>
+            <img src="https://picsum.photos/id/1/200/200" alt="AI头像" class="player-avatar">
+        </div>
+    </div>
+
+    <div class="board-container">
+        <div class="board" id="board">
+            <!-- 棋盘将通过JS动态生成 -->
+        </div>
+    </div>
+
+    <div class="bottom-actions">
+        <button class="action-btn btn-undo">
+            <i data-lucide="rotate-left"></i> 悔棋
+        </button>
+        <button class="action-btn btn-resign" onclick="window.parent.document.querySelector('[data-page=result.html]').click()">
+            <i data-lucide="flag"></i> 认输
+        </button>
+        <button class="action-btn btn-settings">
+            <i data-lucide="settings"></i>
+        </button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/umd/lucide.min.js"></script>
+    <script>
+        // 生成棋盘网格线
+        const board = document.getElementById('board');
+        const boardSize = 320;
+        const gridCount = 15;
+        const cellSize = boardSize / gridCount;
+
+        // 绘制横线
+        for (let i = 0; i < gridCount; i++) {
+            const line = document.createElement('div');
+            line.className = 'grid-line horizontal';
+            line.style.top = `${i * cellSize}px`;
+            board.appendChild(line);
+        }
+
+        // 绘制竖线
+        for (let i = 0; i < gridCount; i++) {
+            const line = document.createElement('div');
+            line.className = 'grid-line vertical';
+            line.style.left = `${i * cellSize}px`;
+            board.appendChild(line);
+        }
+
+        // 绘制星位点
+        const starPoints = [
+            {x: 3, y: 3}, {x: 3, y: 11},
+            {x: 7, y: 7}, // 天元
+            {x: 11, y: 3}, {x: 11, y: 11}
+        ];
+        
+        starPoints.forEach(point => {
+            const star = document.createElement('div');
+            star.className = 'star-point';
+            star.style.left = `${point.x * cellSize}px`;
+            star.style.top = `${point.y * cellSize}px`;
+            board.appendChild(star);
+        });
+
+        // 预设一些棋子
+        const presetStones = [
+            {x: 7, y: 7, color: 'black', isLast: true},
+            {x: 6, y: 7, color: 'white'},
+            {x: 7, y: 6, color: 'white'},
+            {x: 8, y: 7, color: 'white'},
+            {x: 7, y: 8, color: 'white'},
+            {x: 5, y: 7, color: 'black'},
+            {x: 7, y: 5, color: 'black'},
+            {x: 9, y: 7, color: 'black'},
+            {x: 7, y: 9, color: 'black'},
+        ];
+
+        presetStones.forEach(stone => {
+            const stoneEl = document.createElement('div');
+            stoneEl.className = `stone ${stone.color} ${stone.isLast ? 'last' : ''}`;
+            stoneEl.style.left = `${(stone.x + 0.5) * cellSize}px`;
+            stoneEl.style.top = `${(stone.y + 0.5) * cellSize}px`;
+            stoneEl.onclick = () => placeStone(stone.x, stone.y);
+            board.appendChild(stoneEl);
+        });
+
+        // 落子函数
+        function placeStone(x, y) {
+            // 移除之前的last标记
+            document.querySelectorAll('.stone.last').forEach(el => {
+                el.classList.remove('last');
+            });
+
+            // 创建新棋子
+            const stoneEl = document.createElement('div');
+            stoneEl.className = 'stone black last';
+            stoneEl.style.left = `${(x + 0.5) * cellSize}px`;
+            stoneEl.style.top = `${(y + 0.5) * cellSize}px`;
+            
+            // 添加落子动画
+            stoneEl.style.transform = 'translate(-50%, -50%) scale(0)';
+            board.appendChild(stoneEl);
+            
+            setTimeout(() => {
+                stoneEl.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 10);
+
+            // 模拟AI落子
+            setTimeout(() => {
+                // 找一个空位落子
+                const emptyPositions = [];
+                for (let i = 3; i < 12; i++) {
+                    for (let j = 3; j < 12; j++) {
+                        let isEmpty = true;
+                        document.querySelectorAll('.stone').forEach(s => {
+                            const sX = parseFloat(s.style.left) / cellSize - 0.5;
+                            const sY = parseFloat(s.style.top) / cellSize - 0.5;
+                            if (Math.round(sX) === i && Math.round(sY) === j) {
+                                isEmpty = false;
+                            }
+                        });
+                        if (isEmpty) emptyPositions.push({x: i, y: j});
+                    }
+                }
+
+                if (emptyPositions.length > 0) {
+                    const randomPos = emptyPositions[Math.floor(Math.random() * emptyPositions.length)];
+                    const aiStone = document.createElement('div');
+                    aiStone.className = 'stone white';
+                    aiStone.style.left = `${(randomPos.x + 0.5) * cellSize}px`;
+                    aiStone.style.top = `${(randomPos.y + 0.5) * cellSize}px`;
+                    aiStone.style.transform = 'translate(-50%, -50%) scale(0)';
+                    board.appendChild(aiStone);
+                    
+                    setTimeout(() => {
+                        aiStone.style.transform = 'translate(-50%, -50%) scale(1)';
+                    }, 100);
+                }
+            }, 500);
+        }
+
+        // 棋盘点击事件
+        board.addEventListener('click', (e) => {
+            const rect = board.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / cellSize);
+            const y = Math.floor((e.clientY - rect.top) / cellSize);
+            
+            // 检查是否已有棋子
+            let hasStone = false;
+            document.querySelectorAll('.stone').forEach(stone => {
+                const sX = parseFloat(stone.style.left) / cellSize - 0.5;
+                const sY = parseFloat(stone.style.top) / cellSize - 0.5;
+                if (Math.round(sX) === x && Math.round(sY) === y) {
+                    hasStone = true;
+                }
+            });
+            
+            if (!hasStone && x >= 0 && x < 15 && y >= 0 && y < 15) {
+                placeStone(x, y);
+            }
+        });
+
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

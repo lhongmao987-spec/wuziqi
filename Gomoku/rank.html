@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋 - 排行榜</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/lucide.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0F172A;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            color: white;
+            margin: 0;
+            padding: 16px;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .page-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #1F2933;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-icon:hover {
+            background-color: #2D3748;
+            transform: scale(1.05);
+        }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 4px;
+        }
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #94A3B8;
+        }
+        .tab.active {
+            background-color: #07C160;
+            color: white;
+        }
+        .rank-list {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+        .rank-item {
+            display: flex;
+            align-items: center;
+            background-color: #1F2933;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+        }
+        .rank-item:hover {
+            background-color: #2D3748;
+            transform: translateX(4px);
+        }
+        .rank-item.my-rank {
+            background-color: rgba(7,193,96,0.1);
+            border: 1px solid #07C160;
+        }
+        .rank-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            margin-right: 12px;
+        }
+        .rank-1 {
+            background-color: #FFD700;
+            color: #111;
+        }
+        .rank-2 {
+            background-color: #C0C0C0;
+            color: #111;
+        }
+        .rank-3 {
+            background-color: #CD7F32;
+            color: white;
+        }
+        .rank-other {
+            background-color: #2D3748;
+            color: #94A3B8;
+        }
+        .rank-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-right: 12px;
+        }
+        .rank-info {
+            flex: 1;
+        }
+        .rank-name {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        .rank-stats {
+            font-size: 12px;
+            color: #94A3B8;
+            display: flex;
+            gap: 12px;
+        }
+        .rank-value {
+            color: #07C160;
+            font-weight: 500;
+        }
+        .rank-score {
+            font-size: 16px;
+            font-weight: 600;
+            color: #07C160;
+        }
+        .my-rank-badge {
+            position: absolute;
+            right: 16px;
+            background-color: #07C160;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        .rank-item.my-rank {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="btn-icon" onclick="window.parent.document.querySelector('[data-page=home.html]').click()">
+            <i data-lucide="arrow-left"></i>
+        </div>
+        <div class="page-title">排行榜</div>
+        <div class="btn-icon">
+            <i data-lucide="search"></i>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active">全服榜</div>
+        <div class="tab">好友榜</div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active">总榜</div>
+        <div class="tab">本周</div>
+        <div class="tab">本月</div>
+    </div>
+
+    <div class="rank-list">
+        <!-- 排名1 -->
+        <div class="rank-item">
+            <div class="rank-number rank-1">1</div>
+            <img src="https://picsum.photos/id/237/200/200" alt="排名1头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">棋神</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">92%</span></span>
+                    <span>场次 <span class="rank-value">586</span></span>
+                    <span>连胜 <span class="rank-value">28</span></span>
+                </div>
+            </div>
+            <div class="rank-score">2856</div>
+        </div>
+
+        <!-- 排名2 -->
+        <div class="rank-item">
+            <div class="rank-number rank-2">2</div>
+            <img src="https://picsum.photos/id/238/200/200" alt="排名2头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">黑白大师</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">89%</span></span>
+                    <span>场次 <span class="rank-value">452</span></span>
+                    <span>连胜 <span class="rank-value">16</span></span>
+                </div>
+            </div>
+            <div class="rank-score">2742</div>
+        </div>
+
+        <!-- 排名3 -->
+        <div class="rank-item">
+            <div class="rank-number rank-3">3</div>
+            <img src="https://picsum.photos/id/239/200/200" alt="排名3头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">五子圣手</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">87%</span></span>
+                    <span>场次 <span class="rank-value">621</span></span>
+                    <span>连胜 <span class="rank-value">12</span></span>
+                </div>
+            </div>
+            <div class="rank-score">2689</div>
+        </div>
+
+        <!-- 排名4-10 -->
+        <div class="rank-item">
+            <div class="rank-number rank-other">4</div>
+            <img src="https://picsum.photos/id/240/200/200" alt="排名4头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">落子无悔</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">85%</span></span>
+                    <span>场次 <span class="rank-value">398</span></span>
+                    <span>连胜 <span class="rank-value">9</span></span>
+                </div>
+            </div>
+            <div class="rank-score">2578</div>
+        </div>
+
+        <div class="rank-item">
+            <div class="rank-number rank-other">5</div>
+            <img src="https://picsum.photos/id/241/200/200" alt="排名5头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">黑白分明</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">83%</span></span>
+                    <span>场次 <span class="rank-value">412</span></span>
+                    <span>连胜 <span class="rank-value">7</span></span>
+                </div>
+            </div>
+            <div class="rank-score">2496</div>
+        </div>
+
+        <!-- 我的排名 -->
+        <div class="rank-item my-rank">
+            <div class="rank-number rank-other">36</div>
+            <img src="https://picsum.photos/id/64/200/200" alt="我的头像" class="rank-avatar" style="border: 2px solid #07C160;">
+            <div class="rank-info">
+                <div class="rank-name">棋艺新手</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">61%</span></span>
+                    <span>场次 <span class="rank-value">128</span></span>
+                    <span>连胜 <span class="rank-value">1</span></span>
+                </div>
+            </div>
+            <div class="rank-score">1852</div>
+            <div class="my-rank-badge">我</div>
+        </div>
+
+        <div class="rank-item">
+            <div class="rank-number rank-other">37</div>
+            <img src="https://picsum.photos/id/242/200/200" alt="排名37头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">围棋爱好者</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">60%</span></span>
+                    <span>场次 <span class="rank-value">145</span></span>
+                    <span>连胜 <span class="rank-value">3</span></span>
+                </div>
+            </div>
+            <div class="rank-score">1845</div>
+        </div>
+
+        <div class="rank-item">
+            <div class="rank-number rank-other">38</div>
+            <img src="https://picsum.photos/id/243/200/200" alt="排名38头像" class="rank-avatar">
+            <div class="rank-info">
+                <div class="rank-name">初学者</div>
+                <div class="rank-stats">
+                    <span>胜率 <span class="rank-value">58%</span></span>
+                    <span>场次 <span class="rank-value">98</span></span>
+                    <span>连胜 <span class="rank-value">2</span></span>
+                </div>
+            </div>
+            <div class="rank-score">1831</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.292.0/dist/umd/lucide.min.js"></script>
+    <script>
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+
+        // 标签切换交互
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // 找到同组的所有标签
+                const parent = tab.parentElement;
+                parent.querySelectorAll('.tab').forEach(t => {
+                    t.classList.remove('active');
+                });
+                tab.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

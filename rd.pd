@@ -1,0 +1,765 @@
+# 微信小程序 · 五子棋开发文档（完整版本）
+
+> 说明：本开发文档面向两类角色：
+>
+> * **UI 开发**：负责页面布局、视觉样式、交互动效等。
+> * **逻辑开发**：负责游戏规则、棋盘状态、人机 AI、房间对战、战绩统计等。
+>   最终通过本文档中定义的接口进行整合，形成一个完整的五子棋微信小程序。
+
+---
+
+## 一、项目概述
+
+### 1.1 项目背景
+
+开发一款微信小程序版五子棋游戏，提供轻量、有质感、容易上手的对局体验，支持：
+
+* 本机双人对战（同一手机轮流下）。
+* 人机对战（多难度选择）。
+* 好友在线对战（基于微信云开发房间）。
+* 基础战绩统计与排行榜。
+
+### 1.2 目标用户
+
+* 喜欢五子棋、棋类游戏的轻度/中度玩家。
+* 想和好友随时下几盘的微信用户。
+
+### 1.3 功能范围
+
+**核心功能：**
+
+1. 棋盘对局（落子、胜负判定、禁手判定、悔棋、认输）。
+2. 人机对战（简单/中等难度 AI）。
+3. 好友对战房间（创建房间、加入房间、同步棋盘状态）。
+4. 个人战绩、基础排行榜。
+5. 游戏规则说明、禁手说明。
+
+---
+
+## 二、技术选型
+
+* **平台**：微信小程序
+* **前端技术**：
+
+  * WXML + WXSS + JS/TS
+  * 使用自定义组件封装棋盘、棋子等
+* **状态管理**：
+
+  * 页面内部用 `data` + 自定义逻辑模块（JS/TS 文件）
+* **云开发**（可选，但推荐）：
+
+  * 云函数：处理战绩更新、排行榜、房间状态同步
+  * 云数据库：存储用户信息、对局记录、房间状态
+* **目录建议**（简化示例）：
+
+  * `/pages/home/` 首页（模式选择）
+  * `/pages/game/` 对局页
+  * `/pages/result/` 结果页
+  * `/pages/rank/` 排行榜
+  * `/pages/profile/` 个人信息/战绩
+  * `/pages/settings/` 设置 & 规则
+  * `/core/` 游戏核心逻辑（GameCore、RuleEngine、AIEngine 等）
+  * `/services/` 云端相关服务（RecordService、RoomManager 等）
+  * `/components/board/` 棋盘组件
+
+---
+
+## 三、整体架构设计
+
+### 3.1 三层结构
+
+1. **UI 层（视图层）**
+
+   * 负责页面布局、按钮、动画、棋盘界面绘制。
+   * 不直接修改棋盘数据，只通过 `GameCore` 提供的接口来操作。
+
+2. **游戏逻辑层（核心模块）**
+
+   * 核心模块：
+
+     * `GameCore`：游戏主控制器（棋局状态、流程）。
+     * `RuleEngine`：规则引擎（合法性、胜负、禁手、和棋）。
+     * `AIEngine`：人机对战的 AI 算法。
+     * `TimeController`：计时逻辑。
+     * `RoomManager`：好友对战房间、状态同步。
+     * `RecordService`：战绩、排行榜相关逻辑。
+
+3. **云服务层**
+
+   * 利用微信云开发：
+
+     * 用户信息 & 战绩集合：如 `users`
+     * 排行榜集合：如 `rank`
+     * 房间集合：如 `rooms`
+   * 所有持久化数据交互通过服务层完成。
+
+### 3.2 角色分工
+
+* **UI 开发**：
+
+  * 完成所有页面的 WXML/WXSS/JS 结构。
+  * 调用 `GameCore` 暴露的接口。
+  * 响应 `GameCore` 提供的回调更新界面。
+
+* **逻辑开发**：
+
+  * 完成 `/core` 目录下逻辑模块实现。
+  * 完成 `/services` 下云接口模块。
+  * 确保逻辑接口与本文档约定一致。
+
+---
+
+## 四、页面与 UI 设计
+
+> 供 UI 开发使用。本节只涉及界面和交互元素，数据由逻辑层提供。
+
+### 4.1 整体视觉规范
+
+1. **风格定位**
+
+   * 简洁高级、棋盘主题，重点突出棋盘与棋子。
+   * 深色背景 + 浅色棋盘卡片。
+   * 统一圆角（8–12px）、轻微阴影，偏微信原生风格。
+
+2. **色彩推荐**
+
+   * 全局背景：深蓝灰 / 石墨色 `#0F172A` / `#111827`
+   * 棋盘底色：米色 / 浅木纹 `#F5E6C8`
+   * 黑棋：`#111111`
+   * 白棋：`#F9FAFB`（偏暖白）
+   * 主题点缀色（按钮主色）：微信绿 `#07C160`
+   * 辅助色：
+
+     * 胜利：`#16A34A`
+     * 失败：`#EF4444`
+     * 系统提示：`#64748B`
+
+3. **字体与排版**
+
+   * 使用系统默认中文字体（苹方/思源黑体等）。
+   * 标题加粗，中大字号；正文注意行距与留白。
+
+4. **通用组件**
+
+   * 主按钮：主题色背景、白字、圆角、轻阴影。
+   * 次按钮：边框描边 + 透明/浅色背景。
+   * 卡片：深色背景上稍浅的灰蓝卡片，内部足够留白。
+
+---
+
+### 4.2 首页（大厅页）
+
+**功能**：模式入口（人机、好友、本机）、显示用户基础战绩和入口导航。
+
+#### 4.2.1 主要元素
+
+1. **顶部用户信息**
+
+   * 头像（点击进入个人信息/战绩页）。
+   * 昵称、简要战绩：总场次、胜率标签。
+
+2. **模式入口卡片**
+
+   * 人机对战：
+
+     * 标题「人机对战」
+     * 难度标签：初级/中级/高级（tag 或下拉选择）。
+   * 好友对战：
+
+     * 标题「好友对战」
+     * 「创建房间」按钮、「加入房间」按钮。
+   * 本机双人对战（可选）：
+
+     * 标题「本机双人」
+
+3. **其他入口**
+
+   * 排行榜按钮。
+   * 游戏规则 / 设置入口。
+   * 底部「快速开始」按钮（默认人机 + 上一次难度）。
+
+#### 4.2.2 视觉与布局
+
+* 上：用户信息卡片。
+* 中：排列模式卡片（纵向或网格）。
+* 下：辅助功能与快速开始按钮。
+* 颜色：深背景 + 稍浅卡片 + 主题绿按钮。
+
+---
+
+### 4.3 对局页（棋盘页面）
+
+**功能**：实际下棋界面。
+
+#### 4.3.1 主要元素
+
+1. **顶部状态栏**
+
+   * 返回按钮。
+   * 当前模式和难度文本（如「人机对战 - 中级」）。
+   * 计时信息（可选单方/双方计时）。
+
+2. **玩家信息区**
+
+   * 黑方信息：头像、昵称、「黑棋」标识、是否当前回合。
+   * 白方信息：同上。
+   * 当前行动方高亮显示「轮到你落子」。
+
+3. **棋盘区域**
+
+   * 15×15 棋盘格。
+   * 可显示天元与星位小点。
+   * 已落棋子：黑白棋子，带轻微阴影。
+   * 最后一步棋子：加光环/描边高亮。
+
+4. **底部操作栏**
+
+   * 悔棋按钮（是否显示/可用由逻辑层控制）。
+   * 认输按钮。
+   * 再来一局按钮（在对局结束时显示）。
+   * 声音、震动开关小图标（可在设置中也配置）。
+
+#### 4.3.2 视觉与布局
+
+* 棋盘区域居中，优先占用空间。
+* 其他 UI 尽量收敛，减少干扰。
+* 落子有小动效（缩放/渐显）与声效（可关闭）。
+
+---
+
+### 4.4 对局结果页（结算页）
+
+**功能**：展示本局结果与统计，并提供再战/返回入口。
+
+#### 4.4.1 主要元素
+
+1. 结果标题：
+
+   * 「你赢了！」/「你输了」/「平局」。
+2. 结果图标：奖杯/失败图标/握手等。
+3. 对局统计：
+
+   * 总步数、用时。
+   * 黑白双方落子数量（可选）。
+4. 玩家信息对比：
+
+   * 双方头像、昵称、段位、胜负标记。
+5. 按钮区：
+
+   * 再来一局。
+   * 返回大厅。
+   * 分享战绩（可调用分享能力或生成图片）。
+
+#### 4.4.2 视觉与布局
+
+* 半透明蒙层 + 居中结果卡片。
+* 胜利用绿色系点缀，失败用红色点缀，整体仍基于深色主题。
+
+---
+
+### 4.5 排行榜页
+
+**功能**：展示全球/好友排行，查看他人胜率与段位。
+
+#### 4.5.1 主要元素
+
+1. Tabs & 筛选：
+
+   * Tab：好友榜 / 全服榜。
+   * 时间维度：总榜 / 本周 / 本月。
+
+2. 排行列表项：
+
+   * 排名序号（Top 3 使用金/银/铜图标）。
+   * 头像 + 昵称。
+   * 段位或 Elo 值（可选）。
+   * 统计数据：总局数、胜率、连胜。
+
+3. 我的排名：
+
+   * 固定显示「我的排名」，即便不在前几名也能展示。
+
+---
+
+### 4.6 个人信息 / 战绩页
+
+**功能**：展示当前用户的详细战绩与成长数据。
+
+#### 4.6.1 主要元素
+
+1. 顶部用户卡片：
+
+   * 大头像、昵称、ID、段位。
+
+2. 战绩总览：
+
+   * 总对局数。
+   * 胜/负/和局数量。
+   * 胜率（可用进度条可视化）。
+   * 最高连胜。
+
+3. 模式分类统计（可选）：
+
+   * 人机模式战绩。
+   * 好友模式战绩。
+
+4. 最近对局列表：
+
+   * 每局：时间、对手昵称、结果、模式。
+
+---
+
+### 4.7 设置 & 游戏规则页
+
+**功能**：配置游戏习惯、阅读规则和禁手说明。
+
+#### 4.7.1 主要元素
+
+1. 设置项（使用 switch 开关）
+
+   * 落子声音。
+   * 震动反馈。
+   * 显示禁手提示。
+   * 是否允许悔棋。
+
+2. 规则说明
+
+   * 基本规则（五子连珠获胜、黑白轮流等）。
+   * 禁手规则（三三、四四、长连的定义）。
+   * 胜负判定与和棋情况说明。
+
+---
+
+## 五、游戏逻辑设计
+
+> 供逻辑开发使用。本节说明核心数据结构与模块职责。
+
+### 5.1 基础枚举与类型
+
+```ts
+// 玩家身份
+enum Player {
+  Black = 'BLACK',
+  White = 'WHITE',
+  None  = 'NONE',
+}
+
+// 棋盘格子状态
+enum CellState {
+  Empty = 0,
+  Black = 1,
+  White = 2,
+}
+
+// 对局结果
+enum GameResult {
+  Ongoing = 'ONGOING',
+  BlackWin = 'BLACK_WIN',
+  WhiteWin = 'WHITE_WIN',
+  Draw = 'DRAW',
+  BlackLoseForbidden = 'BLACK_LOSE_FORBIDDEN',
+  Resign = 'RESIGN',
+  Timeout = 'TIMEOUT',
+}
+
+// 游戏模式
+enum GameMode {
+  PVP_LOCAL = 'PVP_LOCAL',    // 本机双人
+  PVE = 'PVE',                // 人机
+  PVP_ONLINE = 'PVP_ONLINE',  // 在线好友
+}
+
+// 游戏阶段
+enum GamePhase {
+  NotStarted = 'NOT_STARTED',
+  Playing = 'PLAYING',
+  Ended = 'ENDED',
+}
+
+// 棋盘和步记录
+type Board = CellState[][]; // 15x15
+
+interface Move {
+  x: number;          // 行（0-14）
+  y: number;          // 列（0-14）
+  player: Player;
+  timestamp: number;  // 毫秒
+}
+```
+
+### 5.2 对局配置与状态
+
+```ts
+interface GameConfig {
+  boardSize: number;              // 默认15
+  ruleSet: 'STANDARD' | 'RENJU';  // 规则版本
+  enableForbidden: boolean;       // 是否启用禁手（黑方）
+  timeLimitPerPlayer?: number;    // 单人总时间（秒），0/undefined 为不限时
+  allowUndo: boolean;             // 是否允许悔棋
+  mode: GameMode;                 // 游戏模式
+  aiLevel?: 'EASY' | 'MEDIUM' | 'HARD'; // 人机难度
+}
+
+interface TimeState {
+  blackRemain: number;        // 黑方剩余时间（秒）
+  whiteRemain: number;        // 白方剩余时间（秒）
+  currentStartTs?: number;    // 当前回合开始计时的时间戳
+}
+
+interface GameState {
+  board: Board;
+  currentPlayer: Player;
+  moves: Move[];
+  result: GameResult;
+  winner?: Player;
+  phase: GamePhase;
+  config: GameConfig;
+  timeState: TimeState;
+  lastMove?: Move;
+}
+```
+
+---
+
+## 六、核心模块设计
+
+### 6.1 GameCore（游戏主控制器）
+
+**职责：**
+
+* 持有并维护 `GameState`。
+* 初始化、重启对局。
+* 处理玩家落子、悔棋、认输。
+* 对接 `RuleEngine`、`AIEngine`、`TimeController`。
+* 对接 `RecordService`（上报结果）。
+* 对外暴露事件回调。
+
+**对外接口（给 UI 调用）：**
+
+```ts
+interface GameCore {
+  init(config: GameConfig): void;                    // 初始化新棋局
+  getState(): GameState;                             // 获取当前状态
+
+  handlePlayerMove(x: number, y: number): void;      // 玩家请求落子
+  handleUndo(): void;                                // 悔棋
+  handleResign(player: Player): void;                // 认输
+
+  tick(deltaMs: number): void;                       // 计时心跳（例如每秒调用一次）
+  restart(): void;                                   // 使用同配置重新开局
+
+  onBoardUpdate(cb: (state: GameState) => void): void;
+  onGameOver(cb: (state: GameState) => void): void;
+  onError(cb: (error: Error) => void): void;
+}
+```
+
+**基本流程：**
+
+* `handlePlayerMove` 中：
+
+  1. 调 `RuleEngine.isValidMove` 检测是否合法。
+  2. 写入棋盘和 `moves`。
+  3. 调 `RuleEngine.applyMoveAndJudge` 判定结果。
+  4. 若结束：设置 `result`、`winner`，停止计时，调用 `RecordService` 上报，触发 `onGameOver`。
+  5. 若未结束：切换 `currentPlayer`，更新计时；若是 PVE 且轮到 AI，则调用 `AIEngine` 生成 AI 落子，重复上述流程。
+  6. 每次状态改变后触发 `onBoardUpdate`。
+
+---
+
+### 6.2 RuleEngine（规则引擎）
+
+**职责：**
+
+* 判断一次落子是否合法。
+* 判断落子后是否赢棋。
+* 判断黑棋是否触发禁手（三三、四四、长连）。
+* 判断是否和棋（棋满无胜负）。
+
+**接口：**
+
+```ts
+interface RuleEngine {
+  isValidMove(board: Board, x: number, y: number): boolean;
+
+  applyMoveAndJudge(
+    board: Board,
+    move: Move,
+    config: GameConfig
+  ): {
+    winner?: Player;
+    result: GameResult; // Ongoing / BlackWin / WhiteWin / BlackLoseForbidden / Draw ...
+  };
+}
+```
+
+**算法设计要点：**
+
+1. **五连判断**：
+
+   * 从当前落点 `(x, y)` 在四个方向统计连续同色数量：水平、垂直、正斜、反斜。
+   * 任意方向连续 ≥5 即判为五连（结合禁手逻辑使用）。
+
+2. **禁手判断（黑方）**：
+
+   * **三三禁手**：当前落子后，是否同时形成两个以上“活三”。
+   * **四四禁手**：是否形成两个以上“四”（含活四和冲四）。
+   * **长连禁手**：连续同色数 ≥6，且不符合规则允许的长连。
+
+3. **和棋**：
+
+   * 棋盘无空位且无人获胜 → 和棋。
+
+---
+
+### 6.3 AIEngine（人机对战模块）
+
+**职责：**
+
+* 在 PVE 模式中，根据当前棋局和难度生成 AI 落子点。
+* 不直接写棋盘，只返回坐标。
+
+**接口：**
+
+```ts
+interface AIEngine {
+  getNextMove(
+    board: Board,
+    player: Player,
+    level: 'EASY' | 'MEDIUM' | 'HARD'
+  ): { x: number, y: number };
+}
+```
+
+**难度设计建议：**
+
+* EASY：随机+简单防守（能赢则下、对方能赢则堵，否则随机在附近空位落子）。
+* MEDIUM：加入简单评分：
+
+  * 为每个候选点计算：
+
+    * “如果下这里我能不能马上赢？”
+    * “如果敌人下这里他能不能马上赢？”
+    * 形成 3 连、4 连的加分。
+* HARD：可留作后续扩展（简单启发式搜索/更复杂评分）。
+
+---
+
+### 6.4 TimeController（计时模块）
+
+**职责：**
+
+* 管理 `TimeState`，实现单人总时间或每步倒计时（可按需求实现）。
+* 检测超时并通知 `GameCore`。
+
+**逻辑简述：**
+
+1. 对局开始时初始化 `TimeState`。
+2. 轮到某方时记录 `currentStartTs`。
+3. `GameCore.tick(deltaMs)` 时更新当前行动方剩余时间。
+4. 如果某方剩余时间 ≤ 0，则设置 `GameResult.Timeout`，判另一方获胜。
+
+---
+
+### 6.5 RoomManager（好友对战房间）
+
+**职责：**
+
+* 创建/加入房间。
+* 将本地 `GameState` 的关键信息同步到云端。
+* 监听房间数据变化，更新本地棋局。
+
+**数据结构示例：**
+
+```ts
+// 云端 rooms 集合大致结构
+interface RoomDoc {
+  roomId: string;
+  ownerOpenId: string;
+  guestOpenId?: string;
+  status: 'WAITING' | 'PLAYING' | 'ENDED';
+  board: Board;
+  currentPlayer: Player;
+  config: GameConfig;
+  lastUpdateTs: number;
+  // 可扩展：result、winner、movesCount 等
+}
+```
+
+**接口示例：**
+
+```ts
+interface RoomManager {
+  createRoom(config: GameConfig): Promise<{ roomId: string }>;
+  joinRoom(roomId: string): Promise<void>;
+  syncStateToCloud(state: GameState): Promise<void>;
+  listenRoomUpdates(
+    roomId: string,
+    onUpdate: (remoteState: Partial<GameState>) => void
+  ): void;
+}
+```
+
+---
+
+### 6.6 RecordService（战绩 & 排行榜）
+
+**职责：**
+
+* 上报对局结果，更新用户胜负、连胜等数据。
+* 提供接口给个人战绩页与排行榜使用。
+
+**数据结构示例：**
+
+```ts
+interface UserStats {
+  openId: string;
+  nickname: string;
+  avatarUrl: string;
+  totalGames: number;
+  winCount: number;
+  loseCount: number;
+  drawCount: number;
+  winRate: number;      // 胜率（可冗余存）
+  maxStreak: number;    // 最高连胜
+  score: number;        // 段位积分
+  // 可扩展：按模式拆分统计
+}
+```
+
+**接口示例：**
+
+```ts
+interface RecordService {
+  reportResult(params: {
+    mode: GameMode;
+    winner?: Player;
+    loser?: Player;
+    result: GameResult;
+    movesCount: number;
+    durationMs: number;
+    blackOpenId?: string;
+    whiteOpenId?: string;
+  }): Promise<void>;
+
+  getUserStats(openId: string): Promise<UserStats>;
+
+  getRankList(
+    type: 'GLOBAL' | 'FRIEND',
+    period: 'ALL' | 'WEEK' | 'MONTH'
+  ): Promise<UserStats[]>;
+}
+```
+
+---
+
+## 七、典型业务流程
+
+### 7.1 人机对战流程
+
+1. 用户在首页选择「人机对战」+ 难度，点击开始。
+2. UI 构造 `GameConfig`，调用 `GameCore.init(config)`。
+3. `GameCore` 初始化 `GameState`，通过 `onBoardUpdate` 回调给 UI。
+4. 用户点击棋盘位置：
+
+   * UI 调 `GameCore.handlePlayerMove(x, y)`。
+   * `GameCore` 内部：规则判断 → 更新棋盘 → 判胜 → 切换到 AI。
+5. 若轮到 AI：
+
+   * 调 `AIEngine.getNextMove` 获取 AI 落子。
+   * `GameCore` 再次走 `RuleEngine` 流程。
+6. 对局结束：
+
+   * `GameCore` 设置 `result` 和 `winner`。
+   * 调 `RecordService.reportResult`。
+   * 触发 `onGameOver`，UI 跳转/弹出对局结果页。
+
+### 7.2 好友房间对战流程（简化）
+
+1. A 在首页选择「好友对战」→「创建房间」，调用 `RoomManager.createRoom`。
+2. A 得到 `roomId`，分享给 B。
+3. B 在「加入房间」中输入 `roomId` 调用 `RoomManager.joinRoom`。
+4. 双方进入对局页，各自初始化 `GameCore`，并使用 `RoomManager.listenRoomUpdates` 监听云端变化。
+5. A 落子 → `GameCore.handlePlayerMove` 更新本地 `GameState` → `RoomManager.syncStateToCloud`。
+6. 云端 `rooms` 文档变化 → B 端监听回调 → 更新本地 `GameState` → UI 渲染。
+7. 结束时：
+
+   * 双方根据 `GameState` 结果分别调用 `RecordService.reportResult` 或由云函数统一计算。
+
+### 7.3 悔棋流程（人机对战举例）
+
+1. 用户点击「悔棋」，UI 调 `GameCore.handleUndo()`。
+2. `GameCore` 校验：`config.allowUndo === true`。
+3. 人机模式：一般回退最近两步（玩家+AI）。
+4. 更新棋盘与 `moves`，设置 `currentPlayer` 为玩家。
+5. 触发 `onBoardUpdate`，UI 更新界面。
+
+---
+
+## 八、UI 与逻辑对接约定（重点给两位开发协作）
+
+1. **UI 调用逻辑层的统一入口**：
+
+   * `GameCore.init(config)`
+   * `GameCore.handlePlayerMove(x, y)`
+   * `GameCore.handleUndo()`
+   * `GameCore.handleResign(player)`
+   * `GameCore.tick(deltaMs)`
+   * `GameCore.getState()`
+
+2. **逻辑层对 UI 的反馈方式**：
+
+   * `onBoardUpdate(state)`：
+
+     * UI 根据 `state.board`、`state.currentPlayer`、`state.lastMove` 更新棋盘显示。
+   * `onGameOver(state)`：
+
+     * UI 弹出结果弹窗或跳转结果页。
+   * `onError(error)`：
+
+     * UI 使用 Toast 提示错误信息（例如“当前位置已有棋子”）。
+
+3. **约束**：
+
+   * **UI 不直接修改棋盘数据**，不直接操作 `board`，只通过 `GameCore` 接口操作。
+   * **逻辑层不直接操作页面**，只通过回调返回状态。
+
+---
+
+## 九、开发计划与建议
+
+1. **阶段一：逻辑原型**
+
+   * 实现 `GameCore + RuleEngine` 的最小可用版本：
+
+     * 本机双人对战
+     * 不含禁手、计时、人机、云功能
+
+2. **阶段二：UI 骨架**
+
+   * 完成所有页面的基本结构和跳转，不与真实逻辑耦合。
+   * 棋盘用假数据渲染，保证交互流程顺畅。
+
+3. **阶段三：对接核心逻辑**
+
+   * `GameCore` 接入棋盘页面。
+   * 完成正常对局、胜负判定、悔棋、认输。
+
+4. **阶段四：扩展功能**
+
+   * 禁手规则。
+   * 人机 AI（至少一个难度）。
+   * 计时模式。
+
+5. **阶段五：云开发与战绩**
+
+   * 接入 `RecordService`，完成战绩和排行榜。
+   * 开发 `RoomManager`，实现好友房间对战。
+
+6. **阶段六：优化与上线**
+
+   * UI 细节、动画音效。
+   * BUG 修复与性能优化。
+   * 小程序审核与上线。
+
+---

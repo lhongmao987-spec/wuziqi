@@ -1,0 +1,319 @@
+import { 
+  IGameCore, GameState, GameConfig, GameResult, GamePhase, Player, Move, TimeState,
+  IRuleEngine, IAIEngine, Board, CellState, GameMode 
+} from './types';
+import { RuleEngine } from './ruleEngine';
+import { AIEngine } from './aiEngine';
+
+export class GameCore implements IGameCore {
+  private state: GameState;
+  private ruleEngine: IRuleEngine;
+  private aiEngine: IAIEngine;
+
+  // 事件回调
+  private onBoardUpdateCallback?: (state: GameState) => void;
+  private onGameOverCallback?: (state: GameState) => void;
+  private onErrorCallback?: (error: Error) => void;
+
+  constructor() {
+    this.ruleEngine = new RuleEngine();
+    this.aiEngine = new AIEngine(this.ruleEngine);
+    
+    // 初始化空状态
+    this.state = this.createInitialState();
+  }
+
+  /**
+   * 创建初始状态
+   */
+  private createInitialState(): GameState {
+    const boardSize = 15;
+    const board: Board = Array(boardSize).fill(null).map(() => 
+      Array(boardSize).fill(CellState.Empty)
+    );
+
+    return {
+      board,
+      currentPlayer: Player.Black,
+      moves: [],
+      result: GameResult.Ongoing,
+      phase: GamePhase.NotStarted,
+      config: {
+        boardSize,
+        ruleSet: 'STANDARD',
+        enableForbidden: false, // 默认关闭禁手，降低初期复杂度
+        allowUndo: true,
+        mode: GameMode.PVP_LOCAL
+      },
+      timeState: {
+        blackRemain: 0,
+        whiteRemain: 0
+      }
+    };
+  }
+
+  /**
+   * 初始化新棋局
+   */
+  init(config: GameConfig): void {
+    const boardSize = config.boardSize || 15;
+    const board: Board = Array(boardSize).fill(null).map(() => 
+      Array(boardSize).fill(CellState.Empty)
+    );
+
+    const timeState: TimeState = {
+      blackRemain: config.timeLimitPerPlayer || 0,
+      whiteRemain: config.timeLimitPerPlayer || 0
+    };
+
+    this.state = {
+      board,
+      currentPlayer: Player.Black,
+      moves: [],
+      result: GameResult.Ongoing,
+      winner: undefined,
+      phase: GamePhase.Playing,
+      config,
+      timeState
+    };
+
+    this.triggerBoardUpdate();
+  }
+
+  /**
+   * 获取当前状态（供UI层渲染）
+   */
+  getState(): GameState {
+    return JSON.parse(JSON.stringify(this.state)); // 深拷贝，防止外部修改
+  }
+
+  /**
+   * 处理玩家落子
+   */
+  handlePlayerMove(x: number, y: number): void {
+    // 阶段检查
+    if (this.state.phase !== GamePhase.Playing) {
+      this.triggerError('对局未开始或已结束');
+      return;
+    }
+
+    // 合法性检查
+    if (!this.ruleEngine.isValidMove(this.state.board, x, y)) {
+      this.triggerError('非法落子：位置已被占用或超出边界');
+      return;
+    }
+
+    // 执行落子
+    this.executeMove(x, y, this.state.currentPlayer);
+  }
+
+  /**
+   * 执行落子（内部方法）
+   */
+  private executeMove(x: number, y: number, player: Player): void {
+    const cellValue = player === Player.Black ? CellState.Black : CellState.White;
+    
+    // 更新棋盘
+    this.state.board[x][y] = cellValue;
+
+    // 记录走子
+    const move: Move = {
+      x, y, player,
+      timestamp: Date.now()
+    };
+    this.state.moves.push(move);
+    this.state.lastMove = move;
+
+    // 规则判定
+    const judgment = this.ruleEngine.applyMoveAndJudge(this.state.board, move, this.state.config);
+    
+    // 处理结果
+    if (judgment.result !== GameResult.Ongoing) {
+      this.endGame(judgment.result, judgment.winner);
+      return;
+    }
+
+    // 切换玩家
+    this.state.currentPlayer = player === Player.Black ? Player.White : Player.Black;
+
+    // 切换回合后重置计时起点
+    this.state.timeState.currentStartTs = Date.now();
+
+    // 触发更新
+    this.triggerBoardUpdate();
+
+    // 如果是人机模式且轮到AI
+    if (this.state.config.mode === GameMode.PVE && this.state.currentPlayer === Player.White) {
+      // 延迟500ms模拟思考，提升用户体验
+      setTimeout(() => {
+        this.makeAIMove();
+      }, 500);
+    }
+  }
+
+  /**
+   * AI落子
+   */
+  private makeAIMove(): void {
+    if (this.state.phase !== GamePhase.Playing) return;
+
+    const aiLevel = this.state.config.aiLevel || 'EASY';
+    const move = this.aiEngine.getNextMove(this.state.board, Player.White, aiLevel);
+    
+    this.executeMove(move.x, move.y, Player.White);
+  }
+
+  /**
+   * 悔棋
+   */
+  handleUndo(): void {
+    if (!this.state.config.allowUndo) {
+      this.triggerError('本局不允许悔棋');
+      return;
+    }
+
+    if (this.state.phase !== GamePhase.Playing) {
+      this.triggerError('对局未开始或已结束，无法悔棋');
+      return;
+    }
+
+    // 根据模式确定悔棋步数
+    let stepsToUndo = 1;
+    if (this.state.config.mode === GameMode.PVE) {
+      // 人机模式需要悔两步（玩家+AI）
+      stepsToUndo = 2;
+    }
+
+    if (this.state.moves.length < stepsToUndo) {
+      this.triggerError('没有可悔的棋步');
+      return;
+    }
+
+    // 移除指定步数
+    for (let i = 0; i < stepsToUndo; i++) {
+      const lastMove = this.state.moves.pop();
+      if (lastMove) {
+        this.state.board[lastMove.x][lastMove.y] = CellState.Empty;
+      }
+    }
+
+    // 更新当前玩家
+    if (this.state.moves.length > 0) {
+      this.state.lastMove = this.state.moves[this.state.moves.length - 1];
+      this.state.currentPlayer = this.state.lastMove.player === Player.Black ? Player.White : Player.Black;
+    } else {
+      this.state.lastMove = undefined;
+      this.state.currentPlayer = Player.Black;
+    }
+
+    this.triggerBoardUpdate();
+  }
+
+  /**
+   * 认输
+   */
+  handleResign(player: Player): void {
+    if (this.state.phase !== GamePhase.Playing) {
+      this.triggerError('对局未开始或已结束');
+      return;
+    }
+
+    const winner = player === Player.Black ? Player.White : Player.Black;
+    this.endGame(GameResult.Resign, winner);
+  }
+
+  /**
+   * 计时心跳
+   */
+  tick(deltaMs: number): void {
+    if (this.state.phase !== GamePhase.Playing || !this.state.config.timeLimitPerPlayer) {
+      return;
+    }
+
+    const now = Date.now();
+    // 允许外部传入deltaMs；若未提供则用时间戳差
+    const elapsedMs = Number.isFinite(deltaMs) && deltaMs > 0
+      ? deltaMs
+      : (this.state.timeState.currentStartTs ? now - this.state.timeState.currentStartTs : 0);
+    const elapsed = elapsedMs / 1000;
+    
+    // 更新当前玩家剩余时间
+    if (this.state.currentPlayer === Player.Black) {
+      this.state.timeState.blackRemain -= elapsed;
+      if (this.state.timeState.blackRemain <= 0) {
+        this.state.timeState.blackRemain = 0;
+        this.endGame(GameResult.Timeout, Player.White);
+        return;
+      }
+    } else {
+      this.state.timeState.whiteRemain -= elapsed;
+      if (this.state.timeState.whiteRemain <= 0) {
+        this.state.timeState.whiteRemain = 0;
+        this.endGame(GameResult.Timeout, Player.Black);
+        return;
+      }
+    }
+
+    // 重置计时起点
+    this.state.timeState.currentStartTs = now;
+  }
+
+  /**
+   * 重新开始（使用当前配置）
+   */
+  restart(): void {
+    this.init(this.state.config);
+  }
+
+  /**
+   * 结束对局
+   */
+  private endGame(result: GameResult, winner?: Player): void {
+    this.state.result = result;
+    this.state.winner = winner;
+    this.state.phase = GamePhase.Ended;
+    this.state.timeState.currentStartTs = undefined;
+
+    // 触发游戏结束回调
+    this.triggerGameOver();
+
+    // TODO: 调用RecordService上报战绩（后续对接）
+    // 示例：RecordService.reportResult({...})
+  }
+
+  /**
+   * 事件订阅
+   */
+  onBoardUpdate(cb: (state: GameState) => void): void {
+    this.onBoardUpdateCallback = cb;
+  }
+
+  onGameOver(cb: (state: GameState) => void): void {
+    this.onGameOverCallback = cb;
+  }
+
+  onError(cb: (error: Error) => void): void {
+    this.onErrorCallback = cb;
+  }
+
+  /**
+   * 触发回调
+   */
+  private triggerBoardUpdate(): void {
+    if (this.onBoardUpdateCallback) {
+      this.onBoardUpdateCallback(this.getState());
+    }
+  }
+
+  private triggerGameOver(): void {
+    if (this.onGameOverCallback) {
+      this.onGameOverCallback(this.getState());
+    }
+  }
+
+  private triggerError(message: string): void {
+    if (this.onErrorCallback) {
+      this.onErrorCallback(new Error(message));
+    }
+  }
+}

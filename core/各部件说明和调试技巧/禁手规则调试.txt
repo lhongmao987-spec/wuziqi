@@ -1,0 +1,4 @@
+先关闭禁手，待基础逻辑稳定后再开启
+
+
+enableForbidden: false // 调通后再改为true
