@@ -39,28 +39,7 @@
       </view>
     </view>
     <view class="controls">
-      <view class="control-group">
-        <view class="control-label">计时模式</view>
-        <picker mode="selector" range="{{timeOptions}}" bindchange="onTimeChange">
-          <view class="picker-value">{{timeOptions[selectedTimeIndex]}}</view>
-        </picker>
-      </view>
       <button class="primary" bindtap="startGame">开始对局</button>
-    </view>
-  </view>
-
-  <view class="grid">
-    <view class="info-card" bindtap="goRank">
-      <view class="info-title">排行榜</view>
-      <view class="info-desc">看看谁是今日连胜王者</view>
-    </view>
-    <view class="info-card" bindtap="goProfile">
-      <view class="info-title">我的战绩</view>
-      <view class="info-desc">胜率、对局数、连胜记录</view>
-    </view>
-    <view class="info-card" bindtap="goSettings">
-      <view class="info-title">规则与设置</view>
-      <view class="info-desc">禁手说明、落子提示、音效</view>
     </view>
   </view>
 </view>

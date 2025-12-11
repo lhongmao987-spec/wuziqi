@@ -1,66 +1,61 @@
-// pages/result/index.js
+const { GameResult, Player } = require('../../core/types');
+
+const resultTextMap = {
+  [GameResult.BlackWin]: '黑棋胜利',
+  [GameResult.WhiteWin]: '白棋胜利',
+  [GameResult.Draw]: '平局',
+  [GameResult.BlackLoseForbidden]: '黑棋禁手判负',
+  [GameResult.Resign]: '对局已结束',
+  [GameResult.Timeout]: '超时判负',
+  [GameResult.Ongoing]: '对局进行中'
+};
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    resultText: '',
+    subText: '',
+    moves: 0,
+    highlight: '',
+    badges: []
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
-  onLoad(options) {
+  onLoad(query) {
+    const result = query.result || GameResult.Ongoing;
+    const winner = query.winner;
+    const moves = Number(query.moves || 0);
 
+    const highlight = winner === Player.Black
+      ? '恭喜，黑棋执先取得胜利'
+      : winner === Player.White
+        ? '白棋后手反击成功'
+        : '再来一局试试吧';
+
+    const badges = [];
+    if (moves > 0 && moves <= 20) badges.push('速战速决');
+    if (result === GameResult.Timeout) badges.push('保持专注，留意计时');
+
+    this.setData({
+      resultText: resultTextMap[result],
+      subText: highlight,
+      moves,
+      highlight,
+      badges
+    });
   },
 
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
+  restart() {
+    const config = wx.getStorageSync('lastConfig');
+    if (config) {
+      const { mode, aiLevel, timeLimitPerPlayer } = config;
+      const query = `mode=${mode}&aiLevel=${aiLevel || ''}` +
+        (timeLimitPerPlayer ? `&timeLimit=${timeLimitPerPlayer}` : '');
+      wx.redirectTo({ url: `/pages/game/index?${query}` });
+    } else {
+      wx.reLaunch({ url: '/pages/index/index' });
+    }
   },
 
-  /**
-   * 生命周期函数--监听页面显示
-   */
-  onShow() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面隐藏
-   */
-  onHide() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+  backHome() {
+    wx.reLaunch({ url: '/pages/index/index' });
   }
-})
+});

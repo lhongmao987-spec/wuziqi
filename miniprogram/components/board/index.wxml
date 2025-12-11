@@ -1,16 +1,16 @@
 <view class="board" style="width: {{size}}px; height: {{size}}px;">
-  <block wx:for="{{gridCount}}" wx:key="row">
-    <block wx:for="{{gridCount}}" wx:key="col">
+  <block wx:for="{{gridCount}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="row">
+    <block wx:for="{{gridCount}}" wx:for-item="col" wx:for-index="colIndex" wx:key="col">
       <view
         class="cell"
-        data-x="{{index}}"
-        data-y="{{$index}}"
+        data-x="{{rowIndex}}"
+        data-y="{{colIndex}}"
         bindtap="onTap"
       >
         <!-- 棋子 -->
-        <block wx:if="{{board[index] && board[index][$index] !== 0}}">
+        <block wx:if="{{board[rowIndex] && board[rowIndex][colIndex] !== 0}}">
           <view
-            class="stone {{board[index][$index] === 1 ? 'black' : 'white'}} {{isLast(index, $index) ? 'last' : ''}}"
+            class="stone {{board[rowIndex][colIndex] === 1 ? 'black' : 'white'}} {{lastMoveMark[rowIndex + '_' + colIndex] ? 'last' : ''}} {{winningMarks[rowIndex + '_' + colIndex] ? 'winning' : ''}}"
           />
         </block>
       </view>

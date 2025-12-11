@@ -3,6 +3,7 @@ page {
   color: #e2e8f0;
   min-height: 100vh;
   padding: 32rpx;
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
@@ -131,25 +132,6 @@ page {
   display: flex;
   align-items: center;
   gap: 16rpx;
-}
-
-.control-group {
-  flex: 1;
-  background: #0b1220;
-  border: 1px solid #1f2937;
-  border-radius: 14rpx;
-  padding: 16rpx;
-}
-
-.control-label {
-  color: #94a3b8;
-  font-size: 26rpx;
-  margin-bottom: 8rpx;
-}
-
-.picker-value {
-  color: #e2e8f0;
-  font-size: 30rpx;
 }
 
 .primary {

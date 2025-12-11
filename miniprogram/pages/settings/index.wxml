@@ -3,6 +3,15 @@
     <view class="title">对局设置</view>
     <view class="item">
       <view class="left">
+        <view class="name">计时模式</view>
+        <view class="sub">设置每方的思考时间限制</view>
+      </view>
+      <picker mode="selector" range="{{timeOptions}}" value="{{selectedTimeIndex}}" bindchange="onTimeChange">
+        <view class="picker-value">{{timeOptions[selectedTimeIndex]}}</view>
+      </picker>
+    </view>
+    <view class="item">
+      <view class="left">
         <view class="name">禁手规则</view>
         <view class="sub">标准规则下默认关闭</view>
       </view>

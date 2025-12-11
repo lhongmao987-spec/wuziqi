@@ -1,66 +1,48 @@
-// pages/index/index.js
+const { GameMode } = require('../../core/types');
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    GameMode,
+    selectedMode: GameMode.PVE,
+    selectedAiLevel: 'MEDIUM',
+    aiLevels: [
+      { label: '初级', value: 'EASY' },
+      { label: '中级', value: 'MEDIUM' },
+      { label: '高级', value: 'HARD' }
+    ]
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
-  onLoad(options) {
-
+  selectPve() {
+    this.setData({ selectedMode: GameMode.PVE });
   },
 
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
+  selectPvp() {
+    this.setData({ selectedMode: GameMode.PVP_LOCAL });
   },
 
-  /**
-   * 生命周期函数--监听页面显示
-   */
-  onShow() {
-
+  selectAi(e) {
+    const value = e.currentTarget.dataset.value;
+    this.setData({ selectedAiLevel: value, selectedMode: GameMode.PVE });
   },
 
-  /**
-   * 生命周期函数--监听页面隐藏
-   */
-  onHide() {
+  startGame() {
+    // 从设置中读取计时模式
+    const settings = wx.getStorageSync('gameSettings') || {};
+    const timeLimit = settings.timeLimit;
+    
+    const query = `mode=${this.data.selectedMode}&aiLevel=${this.data.selectedAiLevel}` +
+      (timeLimit ? `&timeLimit=${timeLimit}` : '');
 
-  },
-
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+    console.log('开始对局，参数：', query);
+    wx.navigateTo({ 
+      url: `/pages/game/index?${query}`,
+      success: () => {
+        console.log('导航成功');
+      },
+      fail: (err) => {
+        console.error('导航失败：', err);
+        wx.showToast({ title: '无法进入游戏', icon: 'none' });
+      }
+    });
   }
-})
+});

@@ -1,66 +1,48 @@
-// pages/settings/index.js
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    toggles: {
+      enableForbidden: false,
+      sound: true,
+      highlight: true
+    },
+    timeOptions: ['不限时', '每方 5 分钟', '每方 10 分钟'],
+    selectedTimeIndex: 0,
+    rules: [
+      '黑先白后，先连成五子者胜',
+      '默认关闭禁手，支持后续开启',
+      '人机模式支持悔棋 1 次 / 回合'
+    ]
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
-  onLoad(options) {
-
+  onLoad() {
+    // 从存储中读取设置
+    const settings = wx.getStorageSync('gameSettings') || {};
+    const timeLimit = settings.timeLimit;
+    let selectedTimeIndex = 0;
+    if (timeLimit === 300) selectedTimeIndex = 1;
+    else if (timeLimit === 600) selectedTimeIndex = 2;
+    
+    this.setData({ selectedTimeIndex });
   },
 
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
+  onSwitchChange(e) {
+    const key = e.currentTarget.dataset.key;
+    this.setData({ [`toggles.${key}`]: e.detail.value });
+    
+    // 保存设置
+    const settings = wx.getStorageSync('gameSettings') || {};
+    settings[key] = e.detail.value;
+    wx.setStorageSync('gameSettings', settings);
   },
 
-  /**
-   * 生命周期函数--监听页面显示
-   */
-  onShow() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面隐藏
-   */
-  onHide() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+  onTimeChange(e) {
+    const index = Number(e.detail.value);
+    this.setData({ selectedTimeIndex: index });
+    
+    // 保存计时设置
+    const timeLimit = [undefined, 300, 600][index];
+    const settings = wx.getStorageSync('gameSettings') || {};
+    settings.timeLimit = timeLimit;
+    wx.setStorageSync('gameSettings', settings);
   }
-})
+});

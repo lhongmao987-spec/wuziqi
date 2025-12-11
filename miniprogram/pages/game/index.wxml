@@ -28,6 +28,7 @@
       grid-count="{{gridCount}}"
       size="{{boardSizePx}}"
       last-move="{{lastMove}}"
+      winning-positions="{{winningPositions}}"
       bind:celltap="handleCellTap"
     />
   </view>

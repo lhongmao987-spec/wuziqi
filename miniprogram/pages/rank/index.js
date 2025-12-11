@@ -1,66 +1,11 @@
-// pages/rank/index.js
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面加载
-   */
-  onLoad(options) {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面显示
-   */
-  onShow() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面隐藏
-   */
-  onHide() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+    ranks: [
+      { name: '小棋圣', wins: 18, streak: 6 },
+      { name: '落子无悔', wins: 15, streak: 4 },
+      { name: '黑白之间', wins: 12, streak: 3 },
+      { name: '快刀手', wins: 9, streak: 2 },
+      { name: '执黑先手', wins: 7, streak: 1 }
+    ]
   }
-})
+});

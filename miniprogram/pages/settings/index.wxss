@@ -2,6 +2,7 @@ page {
   background: #0f172a;
   min-height: 100vh;
   padding: 32rpx;
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   color: #e2e8f0;
 }
@@ -51,6 +52,14 @@ page {
 .sub {
   font-size: 24rpx;
   color: #94a3b8;
+}
+
+.picker-value {
+  color: #e2e8f0;
+  font-size: 28rpx;
+  padding: 8rpx 16rpx;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8rpx;
 }
 
 .list {

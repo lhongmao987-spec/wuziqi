@@ -2,6 +2,7 @@ page {
   background: #0f172a;
   min-height: 100vh;
   padding: 32rpx;
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   color: #e2e8f0;
 }
