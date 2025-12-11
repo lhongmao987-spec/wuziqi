@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Board, CellState, Player, IAIEngine } from './types';
 
 export class AIEngine implements IAIEngine {

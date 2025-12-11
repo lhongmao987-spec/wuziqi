@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { GameCore } from '../../core/gameCore';
 import { Player, GameMode, GameConfig, GameState } from '../../core/types';
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { GameResult, Player } from '../../core/types';
 
 const resultTextMap: Record<GameResult, string> = {

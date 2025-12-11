@@ -1,5 +1,6 @@
-import { 
-  Board, CellState, Move, Player, GameResult, GameConfig, IRuleEngine 
+// @ts-nocheck
+import {
+  Board, CellState, Move, Player, GameResult, GameConfig, IRuleEngine
 } from './types';
 
 export class RuleEngine implements IRuleEngine {

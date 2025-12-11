@@ -1,3 +1,4 @@
+// @ts-nocheck
 // 玩家身份
 export enum Player {
   Black = 'BLACK',

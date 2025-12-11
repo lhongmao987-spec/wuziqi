@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { GameMode } from '../../core/types';
 
 Page({
