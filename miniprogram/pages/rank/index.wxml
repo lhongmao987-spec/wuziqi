@@ -1,0 +1,20 @@
+<view class="page">
+  <view class="card">
+    <view class="title">排行榜</view>
+    <view class="subtitle">示例数据，后续可接入云端统计</view>
+    <view class="list">
+      <block wx:for="{{ranks}}" wx:key="name">
+        <view class="item">
+          <view class="left">
+            <view class="index">{{index + 1}}</view>
+            <view class="name">{{item.name}}</view>
+          </view>
+          <view class="right">
+            <view class="stat">{{item.wins}} 胜</view>
+            <view class="streak">连胜 {{item.streak}}</view>
+          </view>
+        </view>
+      </block>
+    </view>
+  </view>
+</view>

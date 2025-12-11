@@ -1,28 +1,66 @@
-<!--index.wxml-->
-<view class="container">
-  <view class="title">快速了解云开发</view>
-  <view class="top_tip">免鉴权接口调用 免部署后台 高并发</view>
-  <view class="power" wx:key="title" wx:for="{{powerList}}" wx:for-item="power">
-    <view class="power_info" data-index="{{index}}" data-type="{{ power.type }}" bindtap="onClickPowerInfo">
-      <view class="power_info_text">
-        <view class="power_info_text_title">
-          {{power.title}}
-          <view class="power_info_text_tag" wx:if="{{power.tag}}">{{power.tag}}</view>
-        </view>
-        <view class="power_info_text_tip">{{power.tip}}</view>
-      </view>
-      <image wx:if="{{!power.showItem && power.item.length}}" class="power_info_more" src="../../images/arrow.svg"></image>
-      <image wx:if="{{power.showItem && power.item.length}}" class="power_info_less" src="../../images/arrow.svg"></image>
-      <image wx:if="{{!power.item.length}}" class="power_item_icon" src="../../images/arrow.svg"></image>
+<view class="page">
+  <view class="hero">
+    <view class="badge">微信小程序 · 五子棋</view>
+    <view class="title">随时来一局</view>
+    <view class="subtitle">选择模式即可开始对弈，AI 难度与计时规则随心配。</view>
+  </view>
+
+  <view class="card">
+    <view class="card-header">
+      <view class="card-title">快速开始</view>
+      <view class="card-desc">本机双人/人机对局一键启动</view>
     </view>
-    <view wx:if="{{power.showItem}}">
-      <view wx:key="title" wx:for="{{power.item}}">
-        <view class="line"></view>
-        <view class="power_item" bindtap="jumpPage" data-type="{{ item.type }}" data-page="{{item.page}}">
-          <view class="power_item_title">{{item.title}}</view>
-          <image class="power_item_icon" src="../../images/arrow.svg"></image>
+    <view class="mode-grid">
+      <view
+        class="mode-tile {{selectedMode === GameMode.PVE ? 'active' : ''}}"
+        bindtap="selectPve"
+      >
+        <view class="mode-title">人机对战</view>
+        <view class="mode-tip">三档难度可选</view>
+        <view class="chips">
+          <block wx:for="{{aiLevels}}" wx:key="value">
+            <view
+              class="chip {{selectedAiLevel === item.value ? 'chip-active' : ''}}"
+              data-value="{{item.value}}"
+              bindtap="selectAi"
+            >
+              {{item.label}}
+            </view>
+          </block>
         </view>
       </view>
+      <view
+        class="mode-tile {{selectedMode === GameMode.PVP_LOCAL ? 'active' : ''}}"
+        bindtap="selectPvp"
+      >
+        <view class="mode-title">本机对战</view>
+        <view class="mode-tip">同屏双人轮流落子</view>
+        <view class="chip chip-line">15×15 经典棋盘</view>
+      </view>
+    </view>
+    <view class="controls">
+      <view class="control-group">
+        <view class="control-label">计时模式</view>
+        <picker mode="selector" range="{{timeOptions}}" bindchange="onTimeChange">
+          <view class="picker-value">{{timeOptions[selectedTimeIndex]}}</view>
+        </picker>
+      </view>
+      <button class="primary" bindtap="startGame">开始对局</button>
+    </view>
+  </view>
+
+  <view class="grid">
+    <view class="info-card" bindtap="goRank">
+      <view class="info-title">排行榜</view>
+      <view class="info-desc">看看谁是今日连胜王者</view>
+    </view>
+    <view class="info-card" bindtap="goProfile">
+      <view class="info-title">我的战绩</view>
+      <view class="info-desc">胜率、对局数、连胜记录</view>
+    </view>
+    <view class="info-card" bindtap="goSettings">
+      <view class="info-title">规则与设置</view>
+      <view class="info-desc">禁手说明、落子提示、音效</view>
     </view>
   </view>
 </view>
