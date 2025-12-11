@@ -32,6 +32,7 @@ Page({
       modeLabel: config.mode === GameMode.PVE
         ? `人机对战 - ${config.aiLevel === 'HARD' ? '高级' : config.aiLevel === 'MEDIUM' ? '中级' : '初级'}`
         : '本机对战',
+      opponentLabel: config.mode === GameMode.PVE ? 'AI 对手' : '玩家 2',
       timerDisplay: config.timeLimitPerPlayer ? this.formatTime(config.timeLimitPerPlayer) : '∞'
     });
 
@@ -78,6 +79,7 @@ Page({
   },
 
   handleGameOver(state: GameState) {
+    wx.setStorageSync('lastConfig', state.config);
     const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}`;
     wx.navigateTo({ url: `/pages/result/index?${params}` });
   },

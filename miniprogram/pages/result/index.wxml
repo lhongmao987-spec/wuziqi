@@ -1,0 +1,26 @@
+<view class="page">
+  <view class="card">
+    <view class="title">{{resultText}}</view>
+    <view class="subtitle">{{subText}}</view>
+
+    <view class="stats">
+      <view class="stat">
+        <view class="stat-label">总步数</view>
+        <view class="stat-value">{{moves}}</view>
+      </view>
+      <view class="stat" wx:if="{{badges.length}}">
+        <view class="stat-label">徽章</view>
+        <view class="chips">
+          <block wx:for="{{badges}}" wx:key="item">
+            <view class="chip">{{item}}</view>
+          </block>
+        </view>
+      </view>
+    </view>
+
+    <view class="actions">
+      <button class="primary" bindtap="restart">再来一局</button>
+      <button class="ghost" bindtap="backHome">返回主页</button>
+    </view>
+  </view>
+</view>

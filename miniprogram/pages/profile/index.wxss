@@ -1,0 +1,96 @@
+page {
+  background: #0f172a;
+  min-height: 100vh;
+  padding: 32rpx;
+  box-sizing: border-box;
+  color: #e2e8f0;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.card {
+  background: #111827;
+  border-radius: 20rpx;
+  padding: 28rpx;
+  box-shadow: 0 12rpx 28rpx rgba(0, 0, 0, 0.32);
+}
+
+.title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.grid {
+  margin-top: 16rpx;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12rpx;
+}
+
+.stat {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 14rpx;
+  padding: 16rpx;
+}
+
+.label {
+  color: #94a3b8;
+  font-size: 24rpx;
+}
+
+.value {
+  margin-top: 6rpx;
+  font-size: 32rpx;
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.list {
+  margin-top: 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.item {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 14rpx;
+  padding: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.name {
+  font-size: 30rpx;
+  color: #e2e8f0;
+}
+
+.sub {
+  font-size: 24rpx;
+  color: #94a3b8;
+}
+
+.result {
+  padding: 10rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.result.win {
+  background: rgba(52, 211, 153, 0.18);
+  color: #34d399;
+}
+
+.result.lose {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}

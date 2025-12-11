@@ -1,0 +1,35 @@
+<view class="page">
+  <view class="card">
+    <view class="title">对局设置</view>
+    <view class="item">
+      <view class="left">
+        <view class="name">禁手规则</view>
+        <view class="sub">标准规则下默认关闭</view>
+      </view>
+      <switch checked="{{toggles.enableForbidden}}" data-key="enableForbidden" bindchange="onSwitchChange" />
+    </view>
+    <view class="item">
+      <view class="left">
+        <view class="name">落子高亮</view>
+        <view class="sub">提示最近一步位置</view>
+      </view>
+      <switch checked="{{toggles.highlight}}" data-key="highlight" bindchange="onSwitchChange" />
+    </view>
+    <view class="item">
+      <view class="left">
+        <view class="name">音效</view>
+        <view class="sub">落子与胜负提示音</view>
+      </view>
+      <switch checked="{{toggles.sound}}" data-key="sound" bindchange="onSwitchChange" />
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">规则速览</view>
+    <view class="list">
+      <block wx:for="{{rules}}" wx:key="item">
+        <view class="rule">{{item}}</view>
+      </block>
+    </view>
+  </view>
+</view>
