@@ -33,15 +33,21 @@ Page({
     const query = `mode=${this.data.selectedMode}&aiLevel=${this.data.selectedAiLevel}` +
       (timeLimit ? `&timeLimit=${timeLimit}` : '');
 
-    console.log('开始对局，参数：', query);
-    wx.navigateTo({ 
+    // 使用 redirectTo 替代 navigateTo，避免页面栈问题
+    wx.redirectTo({ 
       url: `/pages/game/index?${query}`,
       success: () => {
         console.log('导航成功');
       },
       fail: (err) => {
         console.error('导航失败：', err);
-        wx.showToast({ title: '无法进入游戏', icon: 'none' });
+        // 如果 redirectTo 失败，尝试 navigateTo
+        wx.navigateTo({ 
+          url: `/pages/game/index?${query}`,
+          fail: () => {
+            wx.showToast({ title: '无法进入游戏', icon: 'none' });
+          }
+        });
       }
     });
   }

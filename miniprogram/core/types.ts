@@ -54,6 +54,7 @@ export interface GameConfig {
   ruleSet: 'STANDARD' | 'RENJU';
   enableForbidden: boolean;       // 是否启用禁手（黑方）
   timeLimitPerPlayer?: number;    // 单人总时间（秒），0/undefined 为不限时
+  timeLimitPerMove?: number;      // 每步时间限制（秒），0/undefined 为不限时
   allowUndo: boolean;             // 是否允许悔棋
   mode: GameMode;
   aiLevel?: 'EASY' | 'MEDIUM' | 'HARD';
@@ -64,6 +65,7 @@ export interface TimeState {
   blackRemain: number;        // 黑方剩余时间（秒）
   whiteRemain: number;        // 白方剩余时间（秒）
   currentStartTs?: number;    // 当前回合开始计时的时间戳
+  currentMoveRemain?: number; // 当前步剩余时间（秒），用于每步计时模式
 }
 
 // 对局状态（UI渲染的唯一数据源）
@@ -77,6 +79,7 @@ export interface GameState {
   config: GameConfig;
   timeState: TimeState;
   lastMove?: Move;
+  winningPositions?: Array<{ x: number; y: number }>; // 获胜的五子位置
 }
 
 // 规则引擎接口（供内部使用）
@@ -105,6 +108,7 @@ export interface IAIEngine {
 export interface IGameCore {
   init(config: GameConfig): void;
   getState(): GameState;
+  restoreState(state: GameState): void;
   handlePlayerMove(x: number, y: number): void;
   handleUndo(): void;
   handleResign(player: Player): void;

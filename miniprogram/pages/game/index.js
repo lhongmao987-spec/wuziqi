@@ -1,7 +1,12 @@
 const { GameCore } = require('../../core/gameCore');
-const { Player, GameMode } = require('../../core/types');
+const { Player, GameMode, GamePhase, GameResult } = require('../../core/types');
 
 const core = new GameCore();
+
+// 根据游戏模式获取存储键
+function getStorageKey(mode) {
+  return mode === GameMode.PVE ? 'currentGameState_PVE' : 'currentGameState_PVP_LOCAL';
+}
 
 Page({
   data: {
@@ -9,52 +14,172 @@ Page({
     gridCount: 15,
     boardSizePx: 320,
     lastMove: null,
+    prevLastMove: null, // 用于检测 AI 落子
     currentPlayer: Player.Black,
     players: Player,
     modeLabel: '人机对战 - 中级',
     opponentLabel: 'AI 对手',
     timerDisplay: '∞',
-    winningPositions: [],
+    enableHighlight: true,
+    enableSound: true,
+    isProcessingMove: false, // 标记是否正在处理落子，防止快速连续点击
   },
+  
+  // 使用同步变量立即阻止重复点击，不依赖异步的setData
+  isProcessingMoveSync: false,
 
   onLoad(query) {
+    console.log('onLoad 被调用', query);
+    // 读取游戏设置
+    const settings = wx.getStorageSync('gameSettings') || {};
+    this.setData({
+      enableHighlight: settings.highlight !== undefined ? settings.highlight : true,
+      enableSound: settings.sound !== undefined ? settings.sound : true,
+    });
+    
+    // 注册回调
+    core.onBoardUpdate((state) => this.updateState(state));
+    core.onGameOver((state) => this.handleGameOver(state));
+    core.onError((err) => wx.showToast({ title: err.message, icon: 'none' }));
+
+    // 根据传入的模式参数，检查是否有对应模式的未完成游戏状态
+    const mode = query.mode || GameMode.PVE;
+    const storageKey = getStorageKey(mode);
+    const savedState = wx.getStorageSync(storageKey);
+    const shouldRestore = query.restore !== 'false' && savedState && 
+                          savedState.phase === GamePhase.Playing && 
+                          savedState.result === GameResult.Ongoing &&
+                          savedState.config.mode === mode;
+
+    if (shouldRestore) {
+      // 恢复游戏状态
+      try {
+        core.restoreState(savedState);
+        const state = core.getState();
+        
+        // 读取最新设置（高亮和音效可以在任何时候更新）
+        const settings = wx.getStorageSync('gameSettings') || {};
+        this.setData({
+          modeLabel: state.config.mode === GameMode.PVE
+            ? `人机对战 - ${state.config.aiLevel === 'HARD' ? '高级' : state.config.aiLevel === 'MEDIUM' ? '中级' : '初级'}`
+            : '本机对战',
+          opponentLabel: state.config.mode === GameMode.PVE ? 'AI 对手' : '玩家 2',
+          timerDisplay: state.config.timeLimitPerMove
+            ? (state.timeState.currentMoveRemain !== undefined 
+                ? this.formatTime(state.timeState.currentMoveRemain) 
+                : this.formatTime(state.config.timeLimitPerMove))
+            : (state.config.timeLimitPerPlayer
+                ? this.formatTime(
+                    state.currentPlayer === Player.Black
+                      ? state.timeState.blackRemain
+                      : state.timeState.whiteRemain
+                  )
+                : '∞'),
+          enableHighlight: settings.highlight !== undefined ? settings.highlight : true,
+          enableSound: settings.sound !== undefined ? settings.sound : true
+        });
+        
+        this.updateState(state);
+        wx.showToast({ title: '已恢复对局', icon: 'success', duration: 1500 });
+      } catch (error) {
+        console.error('恢复游戏状态失败:', error);
+        // 恢复失败，重新初始化
+        this.initNewGame(query);
+      }
+    } else {
+      // 初始化新游戏
+      this.initNewGame(query);
+    }
+
+    this.startTick();
+  },
+
+  initNewGame(query) {
+    console.log('initNewGame 被调用', query);
+    // 读取游戏设置
+    const settings = wx.getStorageSync('gameSettings') || {};
+    
     // 构造配置：从 query 读取模式/难度，否则使用默认
+    const mode = query.mode || GameMode.PVE;
     const config = {
       boardSize: 15,
       ruleSet: 'STANDARD',
-      enableForbidden: false,
+      enableForbidden: settings.enableForbidden !== undefined ? settings.enableForbidden : false,
       allowUndo: true,
-      mode: query.mode || GameMode.PVE,
+      mode: mode,
       aiLevel: query.aiLevel || 'MEDIUM',
       timeLimitPerPlayer: query.timeLimit ? Number(query.timeLimit) : undefined,
+      // 本机对战模式下，默认启用每步60秒计时
+      timeLimitPerMove: mode === GameMode.PVP_LOCAL ? 60 : undefined,
     };
+
+    console.log('initNewGame - mode:', mode, 'config.timeLimitPerMove:', config.timeLimitPerMove);
 
     this.setData({
       modeLabel: config.mode === GameMode.PVE
         ? `人机对战 - ${config.aiLevel === 'HARD' ? '高级' : config.aiLevel === 'MEDIUM' ? '中级' : '初级'}`
         : '本机对战',
       opponentLabel: config.mode === GameMode.PVE ? 'AI 对手' : '玩家 2',
-      timerDisplay: config.timeLimitPerPlayer ? this.formatTime(config.timeLimitPerPlayer) : '∞'
+      timerDisplay: config.timeLimitPerMove ? this.formatTime(config.timeLimitPerMove) : (config.timeLimitPerPlayer ? this.formatTime(config.timeLimitPerPlayer) : '∞')
     });
 
-    core.onBoardUpdate((state) => this.updateState(state));
-    core.onGameOver((state) => this.handleGameOver(state));
-    core.onError((err) => wx.showToast({ title: err.message, icon: 'none' }));
-
     core.init(config);
+  },
 
-    this.startTick();
+  onShow() {
+    // 从设置页面返回时，重新读取设置并更新（高亮和音效可以随时更新）
+    const settings = wx.getStorageSync('gameSettings') || {};
+    this.setData({
+      enableHighlight: settings.highlight !== undefined ? settings.highlight : true,
+      enableSound: settings.sound !== undefined ? settings.sound : true
+    });
+  },
+
+  onHide() {
+    // 页面隐藏时停止定时器（跳转到结算页面时）
+    this.stopTick();
   },
 
   onUnload() {
     this.stopTick();
+    // 页面卸载时保存游戏状态（如果游戏还在进行中）
+    const state = core.getState();
+    if (state.phase === GamePhase.Playing && state.result === GameResult.Ongoing) {
+      const storageKey = getStorageKey(state.config.mode);
+      wx.setStorageSync(storageKey, state);
+    } else {
+      // 游戏已结束，清除保存的状态
+      const storageKey = getStorageKey(state.config.mode);
+      wx.removeStorageSync(storageKey);
+    }
   },
 
   tickTimer: 0,
 
   startTick() {
-    this.stopTick();
-    this.tickTimer = setInterval(() => core.tick(1000), 1000);
+    // 先清除可能存在的旧定时器
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = 0;
+    }
+    
+    // 只在游戏进行中才启动定时器
+    const state = core.getState();
+    if (state.phase === GamePhase.Playing) {
+      const timerId = setInterval(() => {
+        const currentState = core.getState();
+        // 检查游戏状态，如果已结束则立即停止定时器
+        if (currentState.phase !== GamePhase.Playing) {
+          clearInterval(timerId);
+          if (this.tickTimer === timerId) {
+            this.tickTimer = 0;
+          }
+          return;
+        }
+        core.tick(1000);
+      }, 1000);
+      this.tickTimer = timerId;
+    }
   },
 
   stopTick() {
@@ -65,30 +190,248 @@ Page({
   },
 
   updateState(state) {
+    const newLastMove = state.lastMove || null;
+    const prevLastMove = this.data.prevLastMove;
+    
+    // 只在人机模式下处理防抖标志
+    if (state.config.mode === GameMode.PVE) {
+      // 如果游戏已结束，重置处理标志
+      if (state.phase !== GamePhase.Playing || state.result !== GameResult.Ongoing) {
+        if (this.isProcessingMoveSync || this.data.isProcessingMove) {
+          this.isProcessingMoveSync = false;
+          this.setData({ isProcessingMove: false });
+        }
+      }
+      
+      // 在人机模式下的标志重置逻辑：
+      // 1. 如果当前轮到玩家（黑棋），且之前设置了处理标志，说明玩家已落子且AI已响应，重置标志
+      // 2. 如果当前轮到AI（白棋），且之前设置了处理标志，说明玩家刚下完黑棋，等待AI下白棋，此时保持标志为true（不重置）
+      if (state.currentPlayer === Player.Black && 
+          (this.isProcessingMoveSync || this.data.isProcessingMove)) {
+        // 玩家回合且处理标志为true，说明上一轮（玩家+AI）已完成，重置标志
+        console.log('AI落子完成，重置处理标志，允许玩家再次点击');
+        this.isProcessingMoveSync = false;
+        this.setData({ isProcessingMove: false });
+      }
+      // 注意：如果 currentPlayer === White，说明玩家刚下完，等待AI，此时不重置标志
+    }
+    
+    // 检测 AI 落子（白棋落子且 lastMove 更新了）
+    const isAIMove = this.data.enableSound && 
+        newLastMove && 
+        newLastMove.player === Player.White &&
+        (!prevLastMove || prevLastMove.x !== newLastMove.x || prevLastMove.y !== newLastMove.y);
+    
+    if (isAIMove) {
+      // AI 落子，播放音效
+      this.playSound('move');
+    }
+    
+    // 计算计时器显示
+    let timerDisplay = '∞';
+    if (state.config.timeLimitPerMove) {
+      if (state.timeState.currentMoveRemain !== undefined) {
+        timerDisplay = this.formatTime(state.timeState.currentMoveRemain);
+      } else {
+        timerDisplay = this.formatTime(state.config.timeLimitPerMove);
+      }
+    } else if (state.config.timeLimitPerPlayer) {
+      timerDisplay = this.formatTime(
+        state.currentPlayer === Player.Black
+          ? state.timeState.blackRemain
+          : state.timeState.whiteRemain
+      );
+    }
+    
+    console.log('updateState - timerDisplay:', timerDisplay, 'timeLimitPerMove:', state.config.timeLimitPerMove, 'currentMoveRemain:', state.timeState.currentMoveRemain);
+    
+    // 更新获胜的五子位置
+    const winningPositions = state.winningPositions || [];
+    
     this.setData({
       board: state.board,
-      lastMove: state.lastMove || null,
+      lastMove: newLastMove,
+      prevLastMove: newLastMove, // 更新上一次的落子记录
       currentPlayer: state.currentPlayer,
-      winningPositions: state.winningPositions || [],
-      timerDisplay: state.config.timeLimitPerPlayer
-        ? this.formatTime(
-            state.currentPlayer === Player.Black
-              ? state.timeState.blackRemain
-              : state.timeState.whiteRemain
-          )
-        : '∞'
+      timerDisplay: timerDisplay,
+      winningPositions: winningPositions // 更新获胜的五子位置
     });
   },
 
   handleGameOver(state) {
+    console.log('handleGameOver 被调用，state.result:', state.result, 'state.winner:', state.winner);
+    
+    // 立即停止tick定时器，避免在结算页面继续执行
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = 0;
+      console.log('handleGameOver: 已清除tick定时器');
+    }
+    
+    // 播放游戏结束音效
+    if (this.data.enableSound) {
+      if (state.result === GameResult.BlackWin || state.result === GameResult.WhiteWin) {
+        this.playSound('win');
+      } else {
+        this.playSound('lose');
+      }
+    }
+    
+    // 游戏结束，清除保存的状态（根据模式清除对应的状态）
+    const storageKey = getStorageKey(state.config.mode);
+    wx.removeStorageSync(storageKey);
     wx.setStorageSync('lastConfig', state.config);
     const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}`;
-    wx.navigateTo({ url: `/pages/result/index?${params}` });
+    console.log('准备跳转到结果页面，params:', params);
+    
+    // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时
+    // 延迟时间需要足够让 setData 和音效播放完成，但不要太长影响用户体验
+    setTimeout(() => {
+      const navigateToResult = () => {
+        wx.navigateTo({ 
+          url: `/pages/result/index?${params}`,
+          success: () => {
+            console.log('跳转到结算页面成功');
+          },
+          fail: (err) => {
+            console.error('navigateTo 跳转失败，尝试使用 redirectTo:', err);
+            // 如果 navigateTo 失败（可能是页面栈已满或超时），使用 redirectTo 作为备选方案
+            wx.redirectTo({
+              url: `/pages/result/index?${params}`,
+              success: () => {
+                console.log('redirectTo 跳转成功');
+              },
+              fail: (err2) => {
+                console.error('redirectTo 也失败:', err2);
+                // 如果都失败了，显示提示并尝试使用 reLaunch
+                wx.showToast({
+                  title: '跳转失败，请重试',
+                  icon: 'none',
+                  duration: 2000
+                });
+                // 最后尝试使用 reLaunch
+                setTimeout(() => {
+                  wx.reLaunch({
+                    url: `/pages/result/index?${params}`,
+                    fail: (err3) => {
+                      console.error('reLaunch 也失败:', err3);
+                    }
+                  });
+                }, 2000);
+              }
+            });
+          }
+        });
+      };
+      
+      // 尝试跳转
+      navigateToResult();
+    }, 150); // 延迟150ms确保状态更新完成
   },
 
   handleCellTap(e) {
+    // 检查游戏状态，确保游戏还在进行中
+    const state = core.getState();
+    if (state.phase !== GamePhase.Playing || state.result !== GameResult.Ongoing) {
+      console.log('游戏未在进行中，忽略点击');
+      return;
+    }
+    
+    // 在人机模式下，需要防抖机制和安全超时
+    if (state.config.mode === GameMode.PVE) {
+      // 使用同步变量立即阻止重复点击（不依赖异步的setData）
+      if (this.isProcessingMoveSync) {
+        console.log('正在处理落子，忽略本次点击（同步检查）');
+        return;
+      }
+      
+      // 双重检查：也检查data中的标志（虽然可能延迟，但作为额外保护）
+      if (this.data.isProcessingMove) {
+        console.log('正在处理落子，忽略本次点击（data检查）');
+        return;
+      }
+      
+      // 在人机模式下，如果当前不是玩家回合，忽略点击
+      if (state.currentPlayer !== Player.Black) {
+        console.log('当前是AI回合，忽略玩家点击');
+        return;
+      }
+    }
+    
     const { x, y } = e.detail;
-    core.handlePlayerMove(Number(x), Number(y));
+    
+    // 只在人机模式下设置防抖标志
+    if (state.config.mode === GameMode.PVE) {
+      // 立即设置同步标志，防止重复点击（同步操作，立即生效）
+      this.isProcessingMoveSync = true;
+      this.setData({ isProcessingMove: true });
+    }
+    
+    try {
+      // 执行落子（这是同步调用，会立即执行）
+      core.handlePlayerMove(Number(x), Number(y));
+      
+      // 执行落子后，立即检查状态，确保标志不会被意外重置
+      // 只在人机模式下处理标志
+      if (state.config.mode === GameMode.PVE) {
+        const stateAfterMove = core.getState();
+        if (stateAfterMove.currentPlayer === Player.White) {
+          // 玩家已下完，当前轮到AI，保持标志为true，等待AI下完
+          console.log('玩家已下完，等待AI落子，保持处理标志');
+        } else if (stateAfterMove.phase !== GamePhase.Playing) {
+          // 游戏已结束，重置标志
+          console.log('游戏已结束，重置处理标志');
+          this.isProcessingMoveSync = false;
+          this.setData({ isProcessingMove: false });
+        }
+      }
+      
+      // 播放落子音效
+      if (this.data.enableSound) {
+        this.playSound('move');
+      }
+    } catch (error) {
+      // 如果落子失败，立即重置标志（只在人机模式下）
+      console.error('落子失败:', error);
+      if (state.config.mode === GameMode.PVE) {
+        this.isProcessingMoveSync = false;
+        this.setData({ isProcessingMove: false });
+      }
+    }
+    
+    // 只在人机模式下设置安全超时，防止标志永远不被重置
+    if (state.config.mode === GameMode.PVE) {
+      setTimeout(() => {
+        if (this.isProcessingMoveSync) {
+          console.log('安全超时，重置 isProcessingMove 标志');
+          this.isProcessingMoveSync = false;
+          this.setData({ isProcessingMove: false });
+        }
+      }, 2000); // 2秒安全超时
+    }
+  },
+  
+  playSound(type) {
+    // 使用微信小程序的音频API播放音效
+    // 注意：实际项目中需要准备音频文件，这里使用系统提示音
+    try {
+      if (type === 'move') {
+        // 落子音效 - 已移除震动反馈
+        // 如需添加真实音频，可在此处使用 wx.createInnerAudioContext() 播放音频文件
+      } else if (type === 'win') {
+        // 胜利音效
+        wx.vibrateShort({
+          type: 'heavy'
+        });
+      } else if (type === 'lose') {
+        // 失败音效
+        wx.vibrateShort({
+          type: 'medium'
+        });
+      }
+    } catch (error) {
+      console.error('播放音效失败:', error);
+    }
   },
 
   handleUndo() {
@@ -96,11 +439,51 @@ Page({
   },
 
   handleResign() {
+    console.log('认输按钮被点击，当前玩家:', this.data.currentPlayer);
     core.handleResign(this.data.currentPlayer);
   },
 
-  backHome() {
-    wx.navigateBack({ delta: 1 });
+  backHome(e) {
+    console.log('返回按钮被点击', e);
+    
+    // 阻止事件冒泡
+    if (e) {
+      e.stopPropagation && e.stopPropagation();
+    }
+    
+    // 保存当前游戏状态（根据模式保存到对应的键）
+    const state = core.getState();
+    if (state.phase === GamePhase.Playing && state.result === GameResult.Ongoing) {
+      const storageKey = getStorageKey(state.config.mode);
+      wx.setStorageSync(storageKey, state);
+      console.log('游戏状态已保存，模式:', state.config.mode, '存储键:', storageKey);
+    }
+    
+    // 直接跳转到首页（使用 reLaunch 确保清除页面栈）
+    wx.reLaunch({
+      url: '/pages/index/index',
+      success: () => {
+        console.log('已跳转到首页');
+      },
+      fail: (err) => {
+        console.error('跳转首页失败:', err);
+        // 如果 reLaunch 失败，尝试 redirectTo
+        wx.redirectTo({
+          url: '/pages/index/index',
+          success: () => {
+            console.log('redirectTo 跳转成功');
+          },
+          fail: (err2) => {
+            console.error('redirectTo 也失败:', err2);
+            wx.showToast({ 
+              title: '返回失败，请检查路径', 
+              icon: 'none',
+              duration: 2000
+            });
+          }
+        });
+      }
+    });
   },
 
   formatTime(seconds) {

@@ -56,6 +56,7 @@ export class GameCore implements IGameCore {
    * 初始化新棋局
    */
   init(config: GameConfig): void {
+    console.log('GameCore.init 被调用', config);
     const boardSize = config.boardSize || 15;
     const board: Board = Array(boardSize).fill(null).map(() => 
       Array(boardSize).fill(CellState.Empty)
@@ -63,8 +64,12 @@ export class GameCore implements IGameCore {
 
     const timeState: TimeState = {
       blackRemain: config.timeLimitPerPlayer || 0,
-      whiteRemain: config.timeLimitPerPlayer || 0
+      whiteRemain: config.timeLimitPerPlayer || 0,
+      currentStartTs: Date.now(),
+      currentMoveRemain: config.timeLimitPerMove ? config.timeLimitPerMove : undefined
     };
+
+    console.log('初始化 timeState:', timeState);
 
     this.state = {
       board,
@@ -74,9 +79,11 @@ export class GameCore implements IGameCore {
       winner: undefined,
       phase: GamePhase.Playing,
       config,
-      timeState
+      timeState,
+      winningPositions: undefined
     };
 
+    console.log('初始化完成，触发更新，state.config.timeLimitPerMove:', this.state.config.timeLimitPerMove);
     this.triggerBoardUpdate();
   }
 
@@ -84,7 +91,49 @@ export class GameCore implements IGameCore {
    * 获取当前状态（供UI层渲染）
    */
   getState(): GameState {
-    return JSON.parse(JSON.stringify(this.state)); // 深拷贝，防止外部修改
+    // 深拷贝，确保所有属性都被包含
+    const stateCopy: GameState = {
+      board: this.state.board.map(row => [...row]),
+      currentPlayer: this.state.currentPlayer,
+      moves: [...this.state.moves],
+      result: this.state.result,
+      winner: this.state.winner,
+      phase: this.state.phase,
+      config: { ...this.state.config },
+      timeState: { ...this.state.timeState },
+      lastMove: this.state.lastMove ? { ...this.state.lastMove } : undefined,
+      winningPositions: this.state.winningPositions ? this.state.winningPositions.map(p => ({ ...p })) : undefined
+    };
+    // 添加调试日志
+    if (this.state.winningPositions) {
+      console.log('getState: state.winningPositions存在，值为:', this.state.winningPositions);
+      console.log('getState: stateCopy.winningPositions为:', stateCopy.winningPositions);
+    } else {
+      console.log('getState: state.winningPositions不存在');
+    }
+    return stateCopy;
+  }
+
+  /**
+   * 恢复游戏状态（用于继续未完成的游戏）
+   */
+  restoreState(state: GameState): void {
+    // 深拷贝状态，防止外部修改影响内部
+    this.state = JSON.parse(JSON.stringify(state));
+    
+    // 如果游戏还在进行中，需要重新设置计时起点
+    if (this.state.phase === GamePhase.Playing) {
+      this.state.timeState.currentStartTs = Date.now();
+      // 如果有每步计时，确保 currentMoveRemain 被正确初始化
+      if (this.state.config.timeLimitPerMove) {
+        if (this.state.timeState.currentMoveRemain === undefined || this.state.timeState.currentMoveRemain <= 0) {
+          this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
+        }
+      }
+    }
+    
+    // 触发更新，让UI层刷新界面
+    this.triggerBoardUpdate();
   }
 
   /**
@@ -94,6 +143,12 @@ export class GameCore implements IGameCore {
     // 阶段检查
     if (this.state.phase !== GamePhase.Playing) {
       this.triggerError('对局未开始或已结束');
+      return;
+    }
+
+    // 在人机模式下，如果当前不是玩家回合，不允许玩家落子
+    if (this.state.config.mode === GameMode.PVE && this.state.currentPlayer !== Player.Black) {
+      this.triggerError('当前是AI回合，请等待AI落子');
       return;
     }
 
@@ -126,18 +181,35 @@ export class GameCore implements IGameCore {
 
     // 规则判定
     const judgment = this.ruleEngine.applyMoveAndJudge(this.state.board, move, this.state.config);
+    console.log('executeMove: judgment结果:', judgment);
     
     // 处理结果
     if (judgment.result !== GameResult.Ongoing) {
+      // 保存获胜的五子位置
+      if (judgment.winningPositions && judgment.winningPositions.length > 0) {
+        this.state.winningPositions = judgment.winningPositions;
+        console.log('executeMove: 游戏结束，保存winningPositions到state:', this.state.winningPositions);
+        console.log('executeMove: state.winningPositions现在为:', this.state.winningPositions);
+      } else {
+        this.state.winningPositions = undefined;
+        console.log('executeMove: 游戏结束，但judgment中没有winningPositions，judgment:', judgment);
+      }
       this.endGame(judgment.result, judgment.winner);
       return;
     }
+    
+    // 游戏继续，清除之前的获胜位置
+    this.state.winningPositions = undefined;
 
     // 切换玩家
     this.state.currentPlayer = player === Player.Black ? Player.White : Player.Black;
 
     // 切换回合后重置计时起点
     this.state.timeState.currentStartTs = Date.now();
+    // 重置每步计时
+    if (this.state.config.timeLimitPerMove) {
+      this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
+    }
 
     // 触发更新
     this.triggerBoardUpdate();
@@ -206,6 +278,15 @@ export class GameCore implements IGameCore {
       this.state.currentPlayer = Player.Black;
     }
 
+    // 重置计时
+    this.state.timeState.currentStartTs = Date.now();
+    if (this.state.config.timeLimitPerMove) {
+      this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
+    }
+
+    // 清除获胜位置（悔棋后游戏继续）
+    this.state.winningPositions = undefined;
+
     this.triggerBoardUpdate();
   }
 
@@ -226,7 +307,8 @@ export class GameCore implements IGameCore {
    * 计时心跳
    */
   tick(deltaMs: number): void {
-    if (this.state.phase !== GamePhase.Playing || !this.state.config.timeLimitPerPlayer) {
+    if (this.state.phase !== GamePhase.Playing) {
+      // 游戏已结束，不再打印日志，避免控制台刷屏
       return;
     }
 
@@ -237,25 +319,64 @@ export class GameCore implements IGameCore {
       : (this.state.timeState.currentStartTs ? now - this.state.timeState.currentStartTs : 0);
     const elapsed = elapsedMs / 1000;
     
-    // 更新当前玩家剩余时间
-    if (this.state.currentPlayer === Player.Black) {
-      this.state.timeState.blackRemain -= elapsed;
-      if (this.state.timeState.blackRemain <= 0) {
-        this.state.timeState.blackRemain = 0;
-        this.endGame(GameResult.Timeout, Player.White);
+    // 每步计时模式（本机对战）
+    if (this.state.config.timeLimitPerMove) {
+      console.log('每步计时模式，timeLimitPerMove:', this.state.config.timeLimitPerMove, 'currentMoveRemain:', this.state.timeState.currentMoveRemain);
+      // 如果 currentMoveRemain 未初始化，进行初始化
+      if (this.state.timeState.currentMoveRemain === undefined) {
+        this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
+        this.state.timeState.currentStartTs = now;
+        this.triggerBoardUpdate();
         return;
       }
-    } else {
-      this.state.timeState.whiteRemain -= elapsed;
-      if (this.state.timeState.whiteRemain <= 0) {
-        this.state.timeState.whiteRemain = 0;
-        this.endGame(GameResult.Timeout, Player.Black);
-        return;
+      
+      this.state.timeState.currentMoveRemain -= elapsed;
+      if (this.state.timeState.currentMoveRemain <= 0) {
+        this.state.timeState.currentMoveRemain = 0;
+        // 本机对战模式下，超时后自动跳过到对方
+        if (this.state.config.mode === GameMode.PVP_LOCAL) {
+          // 自动跳过：切换玩家并重置计时
+          this.state.currentPlayer = this.state.currentPlayer === Player.Black ? Player.White : Player.Black;
+          this.state.timeState.currentStartTs = now;
+          this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
+          this.triggerBoardUpdate();
+          return;
+        } else {
+          // 其他模式下，超时判负
+          const winner = this.state.currentPlayer === Player.Black ? Player.White : Player.Black;
+          this.endGame(GameResult.Timeout, winner);
+          return;
+        }
       }
+      // 更新时间后触发UI更新
+      this.triggerBoardUpdate();
+      // 重置计时起点
+      this.state.timeState.currentStartTs = now;
+      return;
     }
+    
+    // 总时间计时模式（原有逻辑）
+    if (this.state.config.timeLimitPerPlayer) {
+      // 更新当前玩家剩余时间
+      if (this.state.currentPlayer === Player.Black) {
+        this.state.timeState.blackRemain -= elapsed;
+        if (this.state.timeState.blackRemain <= 0) {
+          this.state.timeState.blackRemain = 0;
+          this.endGame(GameResult.Timeout, Player.White);
+          return;
+        }
+      } else {
+        this.state.timeState.whiteRemain -= elapsed;
+        if (this.state.timeState.whiteRemain <= 0) {
+          this.state.timeState.whiteRemain = 0;
+          this.endGame(GameResult.Timeout, Player.Black);
+          return;
+        }
+      }
 
-    // 重置计时起点
-    this.state.timeState.currentStartTs = now;
+      // 重置计时起点
+      this.state.timeState.currentStartTs = now;
+    }
   }
 
   /**
@@ -273,6 +394,10 @@ export class GameCore implements IGameCore {
     this.state.winner = winner;
     this.state.phase = GamePhase.Ended;
     this.state.timeState.currentStartTs = undefined;
+    this.state.timeState.currentMoveRemain = undefined;
+
+    // 先触发一次boardUpdate，确保winningPositions等状态更新到UI
+    this.triggerBoardUpdate();
 
     // 触发游戏结束回调
     this.triggerGameOver();

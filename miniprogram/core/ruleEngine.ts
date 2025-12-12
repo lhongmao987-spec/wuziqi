@@ -19,6 +19,7 @@ export class RuleEngine implements IRuleEngine {
   applyMoveAndJudge(board: Board, move: Move, config: GameConfig): {
     winner?: Player;
     result: GameResult;
+    winningPositions?: Array<{ x: number; y: number }>;
   } {
     // 先检查禁手（仅黑方且启用禁手规则）
     if (config.enableForbidden && move.player === Player.Black) {
@@ -32,11 +33,13 @@ export class RuleEngine implements IRuleEngine {
     }
 
     // 检查是否五连
-    const winner = this.checkFiveInRow(board, move);
-    if (winner) {
+    const fiveInRowResult = this.checkFiveInRow(board, move);
+    if (fiveInRowResult) {
+      console.log('ruleEngine: 检测到五连，positions:', fiveInRowResult.positions);
       return {
-        winner,
-        result: winner === Player.Black ? GameResult.BlackWin : GameResult.WhiteWin
+        winner: fiveInRowResult.player,
+        result: fiveInRowResult.player === Player.Black ? GameResult.BlackWin : GameResult.WhiteWin,
+        winningPositions: fiveInRowResult.positions
       };
     }
 
@@ -55,8 +58,9 @@ export class RuleEngine implements IRuleEngine {
 
   /**
    * 检查五连（核心算法）
+   * 返回获胜的玩家和五子位置坐标
    */
-  private checkFiveInRow(board: Board, move: Move): Player | null {
+  private checkFiveInRow(board: Board, move: Move): { player: Player; positions: Array<{ x: number; y: number }> } | null {
     const directions = [
       [[0, 1], [0, -1]],   // 水平
       [[1, 0], [-1, 0]],   // 垂直
@@ -68,13 +72,15 @@ export class RuleEngine implements IRuleEngine {
     const cellValue = player === Player.Black ? CellState.Black : CellState.White;
 
     for (const dir of directions) {
-      let count = 1; // 包含当前落子
+      const positions: Array<{ x: number; y: number }> = [{ x: move.x, y: move.y }]; // 包含当前落子
+      let count = 1;
 
       // 正方向统计
       for (let i = 1; i < 5; i++) {
         const nx = move.x + dir[0][0] * i;
         const ny = move.y + dir[0][1] * i;
         if (this.isInBounds(board, nx, ny) && board[nx][ny] === cellValue) {
+          positions.push({ x: nx, y: ny });
           count++;
         } else {
           break;
@@ -86,6 +92,7 @@ export class RuleEngine implements IRuleEngine {
         const nx = move.x + dir[1][0] * i;
         const ny = move.y + dir[1][1] * i;
         if (this.isInBounds(board, nx, ny) && board[nx][ny] === cellValue) {
+          positions.unshift({ x: nx, y: ny }); // 插入到前面，保持顺序
           count++;
         } else {
           break;
@@ -93,7 +100,16 @@ export class RuleEngine implements IRuleEngine {
       }
 
       if (count >= 5) {
-        return player;
+        // 只返回前5个位置（如果超过5个，取中间的5个）
+        let finalPositions = positions;
+        if (positions.length > 5) {
+          const startIdx = Math.max(0, Math.floor((positions.length - 5) / 2));
+          finalPositions = positions.slice(startIdx, startIdx + 5);
+        }
+        return {
+          player,
+          positions: finalPositions
+        };
       }
     }
 

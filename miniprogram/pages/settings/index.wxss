@@ -62,16 +62,75 @@ page {
   border-radius: 8rpx;
 }
 
-.list {
+.rules-container {
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
+  gap: 16rpx;
 }
 
-.rule {
+.rule-section {
   background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 12rpx;
-  padding: 14rpx;
+  overflow: hidden;
+}
+
+.rule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.rule-header:active {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.rule-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.rule-icon {
+  font-size: 24rpx;
+  color: #94a3b8;
+  transition: transform 0.3s;
+  transform: rotate(-90deg);
+}
+
+.rule-icon.expanded {
+  transform: rotate(0deg);
+}
+
+.rule-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+}
+
+.rule-content.expanded {
+  max-height: 2000rpx;
+  transition: max-height 0.3s ease-in;
+}
+
+.rule-text {
+  display: flex;
+  padding: 12rpx 20rpx;
+  padding-left: 20rpx;
   color: #cbd5e1;
+  font-size: 28rpx;
+  line-height: 1.6;
+}
+
+.rule-bullet {
+  color: #60a5fa;
+  margin-right: 12rpx;
+  flex-shrink: 0;
+}
+
+.rule-item {
+  flex: 1;
 }

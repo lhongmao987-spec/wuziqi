@@ -14,11 +14,23 @@ Component({
     },
     lastMove: {
       type: Object,
-      value: null
+      value: null,
+      observer: 'updateLastMoveMark'
+    },
+    winningPositions: {
+      type: Array,
+      value: [],
+      observer: 'updateWinningMarks'
+    },
+    enableHighlight: {
+      type: Boolean,
+      value: true
     }
   },
   data: {
-    starPoints: []
+    starPoints: [],
+    lastMoveMark: {} as Record<string, boolean>,
+    winningMarks: {} as Record<string, boolean>
   },
   lifetimes: {
     attached() {
@@ -42,6 +54,40 @@ Component({
     isLast(x: number, y: number) {
       const last = this.data.lastMove as any;
       return last && last.x === x && last.y === y;
+    },
+    updateLastMoveMark(newVal: any) {
+      if (!this.data.enableHighlight) {
+        this.setData({ lastMoveMark: {} });
+        return;
+      }
+      const mark: Record<string, boolean> = {};
+      if (newVal && typeof newVal.x === 'number' && typeof newVal.y === 'number') {
+        mark[`${newVal.x}_${newVal.y}`] = true;
+      }
+      this.setData({ lastMoveMark: mark });
+    },
+    updateWinningMarks(newVal: any) {
+      const marks: Record<string, boolean> = {};
+      console.log('board组件 updateWinningMarks 被调用，newVal:', newVal);
+      if (Array.isArray(newVal) && newVal.length > 0) {
+        newVal.forEach((pos: any) => {
+          if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+            marks[`${pos.x}_${pos.y}`] = true;
+          }
+        });
+        console.log('board组件生成的winningMarks:', marks);
+      }
+      this.setData({ winningMarks: marks });
+    }
+  },
+  
+  observers: {
+    'enableHighlight': function(enableHighlight: boolean) {
+      if (!enableHighlight) {
+        this.setData({ lastMoveMark: {} });
+      } else if (this.data.lastMove) {
+        this.updateLastMoveMark(this.data.lastMove);
+      }
     }
   }
 });

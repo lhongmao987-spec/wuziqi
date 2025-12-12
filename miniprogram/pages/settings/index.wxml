@@ -3,15 +3,6 @@
     <view class="title">对局设置</view>
     <view class="item">
       <view class="left">
-        <view class="name">计时模式</view>
-        <view class="sub">设置每方的思考时间限制</view>
-      </view>
-      <picker mode="selector" range="{{timeOptions}}" value="{{selectedTimeIndex}}" bindchange="onTimeChange">
-        <view class="picker-value">{{timeOptions[selectedTimeIndex]}}</view>
-      </picker>
-    </view>
-    <view class="item">
-      <view class="left">
         <view class="name">禁手规则</view>
         <view class="sub">标准规则下默认关闭</view>
       </view>
@@ -34,11 +25,20 @@
   </view>
 
   <view class="card">
-    <view class="title">规则速览</view>
-    <view class="list">
-      <block wx:for="{{rules}}" wx:key="item">
-        <view class="rule">{{item}}</view>
-      </block>
+    <view class="title">游戏规则</view>
+    <view class="rules-container">
+      <view class="rule-section" wx:for="{{ruleSections}}" wx:key="title">
+        <view class="rule-header" bindtap="toggleRule" data-index="{{index}}">
+          <view class="rule-title">{{item.title}}</view>
+          <view class="rule-icon {{item.expanded ? 'expanded' : ''}}">▼</view>
+        </view>
+        <view class="rule-content {{item.expanded ? 'expanded' : ''}}">
+          <view class="rule-text" wx:for="{{item.items}}" wx:key="*this" wx:for-item="ruleItem">
+            <text class="rule-bullet">•</text>
+            <text class="rule-item">{{ruleItem}}</text>
+          </view>
+        </view>
+      </view>
     </view>
   </view>
 </view>

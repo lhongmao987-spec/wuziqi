@@ -30,16 +30,19 @@ Component({
   },
   lifetimes: {
     attached() {
-      const cell = this.data.size / this.data.gridCount;
-      this.setData({
-        starPoints: [
-          { x: cell * 3 + 0.5 * cell, y: cell * 3 + 0.5 * cell },
-          { x: cell * 3 + 0.5 * cell, y: cell * 11 + 0.5 * cell },
-          { x: cell * 7 + 0.5 * cell, y: cell * 7 + 0.5 * cell },
-          { x: cell * 11 + 0.5 * cell, y: cell * 3 + 0.5 * cell },
-          { x: cell * 11 + 0.5 * cell, y: cell * 11 + 0.5 * cell }
-        ]
-      });
+      // 延迟计算星位点，避免阻塞页面渲染
+      setTimeout(() => {
+        const cell = this.data.size / this.data.gridCount;
+        this.setData({
+          starPoints: [
+            { x: cell * 3 + 0.5 * cell, y: cell * 3 + 0.5 * cell },
+            { x: cell * 3 + 0.5 * cell, y: cell * 11 + 0.5 * cell },
+            { x: cell * 7 + 0.5 * cell, y: cell * 7 + 0.5 * cell },
+            { x: cell * 11 + 0.5 * cell, y: cell * 3 + 0.5 * cell },
+            { x: cell * 11 + 0.5 * cell, y: cell * 11 + 0.5 * cell }
+          ]
+        });
+      }, 0);
     }
   },
   methods: {

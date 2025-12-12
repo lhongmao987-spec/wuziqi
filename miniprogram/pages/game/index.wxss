@@ -14,9 +14,22 @@
 }
 
 .btn-icon {
-  padding: 8px 12px;
-  background: #1F2933;
-  border-radius: 12px;
+  padding: 8px 12px !important;
+  background: #1F2933 !important;
+  border-radius: 12px !important;
+  border: none !important;
+  color: #fff !important;
+  font-size: 14px !important;
+  min-width: 60px !important;
+  text-align: center !important;
+  line-height: 1.5 !important;
+  margin: 0 !important;
+  position: relative !important;
+  z-index: 999 !important;
+}
+
+.btn-icon-hover {
+  background: #2D3748 !important;
 }
 
 .game-mode {

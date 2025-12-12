@@ -1,6 +1,6 @@
 <view class="page">
   <view class="top-bar">
-    <view class="btn-icon" bindtap="backHome">返回</view>
+    <button class="btn-icon" bindtap="backHome" hover-class="btn-icon-hover" plain="true">返回</button>
     <view class="game-mode">{{modeLabel}}</view>
     <view class="timer">{{timerDisplay}}</view>
   </view>
@@ -29,6 +29,7 @@
       size="{{boardSizePx}}"
       last-move="{{lastMove}}"
       winning-positions="{{winningPositions}}"
+      enable-highlight="{{enableHighlight}}"
       bind:celltap="handleCellTap"
     />
   </view>
