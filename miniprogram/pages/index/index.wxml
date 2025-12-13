@@ -42,4 +42,17 @@
       <button class="primary" bindtap="startGame">开始对局</button>
     </view>
   </view>
+
+  <view class="card invite-card">
+    <view class="card-header">
+      <view class="card-title">邀请好友</view>
+      <view class="card-desc">分享给好友，一起享受五子棋的乐趣</view>
+    </view>
+    <view class="controls">
+      <button class="invite-btn" open-type="share">
+        <text class="invite-icon">👥</text>
+        <text>邀请好友对战</text>
+      </button>
+    </view>
+  </view>
 </view>

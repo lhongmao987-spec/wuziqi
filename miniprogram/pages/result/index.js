@@ -41,6 +41,43 @@ Page({
       highlight,
       badges
     });
+    
+    // 上报战绩（只在人机对战模式下上报）
+    const playerResult = query.playerResult;
+    const mode = query.mode;
+    if (playerResult && mode && mode !== 'PVP_LOCAL') {
+      // 本机对战不记录战绩
+      this.reportGameResult({
+        result: playerResult,
+        moves: moves,
+        mode: mode,
+        opponentType: query.opponentType || 'AI',
+        opponentName: query.opponentName || 'AI',
+        difficulty: query.difficulty || '',
+        duration: Number(query.duration || 0)
+      });
+    }
+  },
+
+  // 上报对局结果
+  reportGameResult(gameData) {
+    wx.cloud.callFunction({
+      name: 'quickstartFunctions',
+      data: {
+        type: 'reportResult',
+        data: gameData
+      },
+      success: (res) => {
+        if (res.result.success) {
+          console.log('战绩上报成功');
+        } else {
+          console.error('战绩上报失败:', res.result.errMsg);
+        }
+      },
+      fail: (err) => {
+        console.error('战绩上报失败:', err);
+      }
+    });
   },
 
   restart() {

@@ -20,6 +20,85 @@ page {
   box-shadow: 0 12rpx 28rpx rgba(0, 0, 0, 0.32);
 }
 
+.user-info {
+  padding: 40rpx 28rpx;
+}
+
+.user-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.avatar {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  border: 4rpx solid #34d399;
+  background: #1f2937;
+}
+
+.avatar-btn {
+  width: 120rpx;
+  height: 120rpx;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+}
+
+.avatar-btn::after {
+  border: none;
+}
+
+.avatar-btn .avatar {
+  width: 100%;
+  height: 100%;
+  border: 4rpx solid #34d399;
+}
+
+.nickname-input {
+  width: 300rpx;
+  padding: 16rpx 24rpx;
+  background: #1f2937;
+  border: 2rpx solid #34d399;
+  border-radius: 50rpx;
+  color: #f8fafc;
+  font-size: 28rpx;
+  text-align: center;
+  margin-top: 20rpx;
+}
+
+.save-btn {
+  margin-top: 20rpx;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 50rpx;
+  padding: 20rpx 40rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  box-shadow: 0 8rpx 16rpx rgba(59, 130, 246, 0.3);
+}
+
+.save-btn::after {
+  border: none;
+}
+
+.save-btn:active {
+  opacity: 0.8;
+}
+
+.user-name {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+
 .title {
   font-size: 36rpx;
   font-weight: 700;

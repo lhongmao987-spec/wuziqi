@@ -171,3 +171,26 @@ page {
   color: #94a3b8;
   font-size: 26rpx;
 }
+
+.invite-card {
+  margin-top: 24rpx;
+}
+
+.invite-btn {
+  flex: 1;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 600;
+  border: none;
+  padding: 22rpx;
+  border-radius: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+}
+
+.invite-icon {
+  font-size: 36rpx;
+}

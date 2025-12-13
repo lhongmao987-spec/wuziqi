@@ -50,5 +50,36 @@ Page({
 
   goSettings() {
     wx.navigateTo({ url: '/pages/settings/index' });
+  },
+
+  // 分享给好友
+  onShareAppMessage(options: WechatMiniprogram.Page.IShareAppMessageOption) {
+    return {
+      title: '来和我一起下五子棋吧！',
+      path: '/pages/index/index?invite=true',
+      imageUrl: '' // 可以后续添加分享图片
+    };
+  },
+
+  // 分享到朋友圈
+  onShareTimeline() {
+    return {
+      title: '来和我一起下五子棋吧！',
+      query: 'invite=true',
+      imageUrl: '' // 可以后续添加分享图片
+    };
+  },
+
+  // 处理分享链接进入
+  onLoad(options: Record<string, string>) {
+    if (options.invite === 'true') {
+      // 显示邀请提示
+      wx.showModal({
+        title: '好友邀请',
+        content: '你的好友邀请你一起下五子棋！在线对战功能正在开发中，敬请期待。',
+        showCancel: false,
+        confirmText: '知道了'
+      });
+    }
   }
 });

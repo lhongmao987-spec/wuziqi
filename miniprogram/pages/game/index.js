@@ -23,6 +23,7 @@ Page({
     enableHighlight: true,
     enableSound: true,
     isProcessingMove: false, // 标记是否正在处理落子，防止快速连续点击
+    gameStartTime: null, // 对局开始时间戳
   },
   
   // 使用同步变量立即阻止重复点击，不依赖异步的setData
@@ -80,6 +81,12 @@ Page({
         });
         
         this.updateState(state);
+        
+        // 恢复游戏时也记录开始时间（使用当前时间，因为无法准确知道原始开始时间）
+        this.setData({
+          gameStartTime: Date.now()
+        });
+        
         wx.showToast({ title: '已恢复对局', icon: 'success', duration: 1500 });
       } catch (error) {
         console.error('恢复游戏状态失败:', error);
@@ -124,6 +131,11 @@ Page({
     });
 
     core.init(config);
+    
+    // 记录对局开始时间
+    this.setData({
+      gameStartTime: Date.now()
+    });
   },
 
   onShow() {
@@ -281,7 +293,50 @@ Page({
     const storageKey = getStorageKey(state.config.mode);
     wx.removeStorageSync(storageKey);
     wx.setStorageSync('lastConfig', state.config);
-    const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}`;
+    
+    // 计算对局时长（秒）
+    const gameStartTime = this.data.gameStartTime || Date.now();
+    const duration = Math.floor((Date.now() - gameStartTime) / 1000);
+    
+    // 确定玩家结果（人机模式下，玩家是黑棋）
+    let playerResult = '负';
+    if (state.config.mode === GameMode.PVE) {
+      // 人机模式：玩家是黑棋
+      if (state.result === GameResult.BlackWin) {
+        playerResult = '胜';
+      } else if (state.result === GameResult.WhiteWin) {
+        playerResult = '负';
+      } else if (state.result === GameResult.Draw) {
+        playerResult = '和';
+      }
+    } else if (state.config.mode === GameMode.PVP_LOCAL) {
+      // 本机对战：不记录战绩（或者可以记录为"本机"）
+      playerResult = '和'; // 本机对战不记录胜负
+    }
+    
+    // 确定对手类型和名称
+    let opponentType = 'AI';
+    let opponentName = 'AI';
+    if (state.config.mode === GameMode.PVE) {
+      opponentType = 'AI';
+      opponentName = 'AI';
+    } else if (state.config.mode === GameMode.PVP_LOCAL) {
+      opponentType = '本机';
+      opponentName = '本机';
+    }
+    
+    // 确定AI难度
+    let difficulty = '';
+    if (state.config.mode === GameMode.PVE && state.config.aiLevel) {
+      const levelMap = {
+        'EASY': '初级',
+        'MEDIUM': '中级',
+        'HARD': '高级'
+      };
+      difficulty = levelMap[state.config.aiLevel] || '中级';
+    }
+    
+    const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}&playerResult=${playerResult}&mode=${state.config.mode}&opponentType=${opponentType}&opponentName=${opponentName}&difficulty=${difficulty}&duration=${duration}`;
     console.log('准备跳转到结果页面，params:', params);
     
     // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时

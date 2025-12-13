@@ -157,6 +157,387 @@ const deleteRecord = async (event) => {
   }
 };
 
+// 登录：获取用户openid并检查/创建用户记录
+const login = async () => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    
+    // 查询用户是否已存在
+    const userResult = await db.collection('users').where({
+      _openid: openid
+    }).get();
+    
+    if (userResult.data.length > 0) {
+      // 用户已存在，返回用户信息
+      return {
+        success: true,
+        data: {
+          openid: openid,
+          userInfo: userResult.data[0]
+        }
+      };
+    } else {
+      // 用户不存在，创建新用户记录
+      const now = new Date();
+      const newUser = {
+        _openid: openid,
+        nickName: '',
+        avatarUrl: '',
+        createTime: now,
+        updateTime: now
+      };
+      
+      const addResult = await db.collection('users').add({
+        data: newUser
+      });
+      
+      return {
+        success: true,
+        data: {
+          openid: openid,
+          userInfo: {
+            _id: addResult._id,
+            ...newUser
+          }
+        }
+      };
+    }
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 保存/更新用户信息
+const saveUserInfo = async (event) => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    const userInfo = event.data;
+    
+    // 更新用户信息
+    const updateResult = await db.collection('users').where({
+      _openid: openid
+    }).update({
+      data: {
+        nickName: userInfo.nickName || '',
+        avatarUrl: userInfo.avatarUrl || '',
+        updateTime: new Date()
+      }
+    });
+    
+    if (updateResult.stats.updated === 0) {
+      // 如果更新失败，可能是用户不存在，创建新记录
+      const now = new Date();
+      await db.collection('users').add({
+        data: {
+          _openid: openid,
+          nickName: userInfo.nickName || '',
+          avatarUrl: userInfo.avatarUrl || '',
+          createTime: now,
+          updateTime: now
+        }
+      });
+    }
+    
+    // 获取更新后的用户信息
+    const userResult = await db.collection('users').where({
+      _openid: openid
+    }).get();
+    
+    return {
+      success: true,
+      data: userResult.data[0] || null
+    };
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 获取用户信息
+const getUserInfo = async () => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    
+    const userResult = await db.collection('users').where({
+      _openid: openid
+    }).get();
+    
+    if (userResult.data.length > 0) {
+      return {
+        success: true,
+        data: userResult.data[0]
+      };
+    } else {
+      return {
+        success: false,
+        errMsg: '用户不存在'
+      };
+    }
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 获取用户战绩
+const getUserStats = async () => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    
+    // 查询用户战绩
+    const statsResult = await db.collection('userStats').where({
+      _openid: openid
+    }).get();
+    
+    if (statsResult.data.length > 0) {
+      const stats = statsResult.data[0];
+      // 计算胜率
+      const totalGames = stats.totalGames || 0;
+      const winCount = stats.winCount || 0;
+      const winRate = totalGames > 0 ? Math.round((winCount / totalGames) * 100) : 0;
+      
+      return {
+        success: true,
+        data: {
+          ...stats,
+          winRate: winRate
+        }
+      };
+    } else {
+      // 用户没有战绩记录，返回默认值
+      return {
+        success: true,
+        data: {
+          totalGames: 0,
+          winCount: 0,
+          loseCount: 0,
+          drawCount: 0,
+          currentStreak: 0,
+          maxStreak: 0,
+          favoriteDifficulty: '中级',
+          winRate: 0,
+          score: 0
+        }
+      };
+    }
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 获取最近对局
+const getRecentGames = async (event) => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    const limit = event.limit || 10; // 默认返回最近10局
+    
+    // 查询最近对局记录
+    const recordsResult = await db.collection('gameRecords')
+      .where({
+        playerOpenId: openid
+      })
+      .orderBy('createTime', 'desc')
+      .limit(limit)
+      .get();
+    
+    return {
+      success: true,
+      data: recordsResult.data || []
+    };
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 上报对局结果
+const reportResult = async (event) => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    const gameData = event.data;
+    
+    // 获取用户信息（用于记录昵称和头像）
+    const userResult = await db.collection('users').where({
+      _openid: openid
+    }).get();
+    const userInfo = userResult.data.length > 0 ? userResult.data[0] : null;
+    
+    // 1. 保存对局记录到 gameRecords
+    const gameRecord = {
+      playerOpenId: openid,
+      opponentType: gameData.opponentType || 'AI', // AI / 好友 / 本机
+      opponentName: gameData.opponentName || 'AI',
+      opponentOpenId: gameData.opponentOpenId || '',
+      result: gameData.result || '负', // 胜 / 负 / 和
+      moves: gameData.moves || 0,
+      duration: gameData.duration || 0, // 对局时长（秒）
+      difficulty: gameData.difficulty || '', // AI难度
+      gameMode: gameData.gameMode || 'PVE', // PVE / PVP_LOCAL / PVP_ONLINE
+      createTime: new Date()
+    };
+    
+    await db.collection('gameRecords').add({
+      data: gameRecord
+    });
+    
+    // 2. 更新或创建用户战绩
+    const statsResult = await db.collection('userStats').where({
+      _openid: openid
+    }).get();
+    
+    const isWin = gameData.result === '胜';
+    const isLose = gameData.result === '负';
+    const isDraw = gameData.result === '和';
+    
+    if (statsResult.data.length > 0) {
+      // 更新现有战绩
+      const oldStats = statsResult.data[0];
+      const newTotalGames = (oldStats.totalGames || 0) + 1;
+      const newWinCount = (oldStats.winCount || 0) + (isWin ? 1 : 0);
+      const newLoseCount = (oldStats.loseCount || 0) + (isLose ? 1 : 0);
+      const newDrawCount = (oldStats.drawCount || 0) + (isDraw ? 1 : 0);
+      
+      // 计算连胜
+      let newCurrentStreak = oldStats.currentStreak || 0;
+      if (isWin) {
+        newCurrentStreak = (oldStats.currentStreak || 0) + 1;
+      } else if (isLose || isDraw) {
+        newCurrentStreak = 0;
+      }
+      const newMaxStreak = Math.max(oldStats.maxStreak || 0, newCurrentStreak);
+      
+      // 更新常用难度（如果是对战AI）
+      let favoriteDifficulty = oldStats.favoriteDifficulty || '中级';
+      if (gameData.difficulty && gameData.opponentType === 'AI') {
+        favoriteDifficulty = gameData.difficulty;
+      }
+      
+      // 计算积分（简单规则：胜+10，负-5，和+2）
+      const newScore = (oldStats.score || 0) + (isWin ? 10 : isLose ? -5 : 2);
+      
+      await db.collection('userStats').where({
+        _openid: openid
+      }).update({
+        data: {
+          totalGames: newTotalGames,
+          winCount: newWinCount,
+          loseCount: newLoseCount,
+          drawCount: newDrawCount,
+          currentStreak: newCurrentStreak,
+          maxStreak: newMaxStreak,
+          favoriteDifficulty: favoriteDifficulty,
+          score: Math.max(0, newScore), // 积分不能为负
+          updateTime: new Date()
+        }
+      });
+    } else {
+      // 创建新战绩记录
+      const newStats = {
+        _openid: openid,
+        nickName: userInfo ? (userInfo.nickName || '') : '',
+        avatarUrl: userInfo ? (userInfo.avatarUrl || '') : '',
+        totalGames: 1,
+        winCount: isWin ? 1 : 0,
+        loseCount: isLose ? 1 : 0,
+        drawCount: isDraw ? 1 : 0,
+        currentStreak: isWin ? 1 : 0,
+        maxStreak: isWin ? 1 : 0,
+        favoriteDifficulty: gameData.difficulty || '中级',
+        score: isWin ? 10 : isLose ? 0 : 2,
+        createTime: new Date(),
+        updateTime: new Date()
+      };
+      
+      await db.collection('userStats').add({
+        data: newStats
+      });
+    }
+    
+    return {
+      success: true,
+      data: '战绩已更新'
+    };
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 获取排行榜
+const getRankList = async (event) => {
+  try {
+    const type = event.rankType || event.type || 'GLOBAL'; // GLOBAL / FRIEND
+    const period = event.period || 'ALL'; // ALL / WEEK / MONTH
+    const limit = event.limit || 100;
+    
+    let query = db.collection('userStats');
+    
+    // 根据时间筛选（如果需要）
+    if (period === 'WEEK' || period === 'MONTH') {
+      const now = new Date();
+      const startDate = new Date();
+      if (period === 'WEEK') {
+        startDate.setDate(now.getDate() - 7);
+      } else if (period === 'MONTH') {
+        startDate.setMonth(now.getMonth() - 1);
+      }
+      // 注意：这里需要根据updateTime筛选，但userStats可能没有按时间筛选的需求
+      // 如果需要按时间筛选，应该筛选gameRecords然后聚合
+    }
+    
+    // 如果是好友榜，需要获取用户的好友列表（这里简化处理，暂时返回全服榜）
+    // 实际实现中，可以通过云函数获取用户的好友关系
+    
+    // 按积分降序排列
+    const result = await query
+      .orderBy('score', 'desc')
+      .limit(limit)
+      .get();
+    
+    // 格式化数据
+    const rankList = result.data.map((item, index) => ({
+      rank: index + 1,
+      name: item.nickName || '未命名',
+      avatarUrl: item.avatarUrl || '',
+      wins: item.winCount || 0,
+      streak: item.maxStreak || 0,
+      totalGames: item.totalGames || 0,
+      winRate: item.totalGames > 0 ? Math.round((item.winCount || 0) / item.totalGames * 100) : 0,
+      score: item.score || 0
+    }));
+    
+    return {
+      success: true,
+      data: rankList
+    };
+  } catch (e) {
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
 // const getOpenId = require('./getOpenId/index');
 // const getMiniProgramCode = require('./getMiniProgramCode/index');
 // const createCollection = require('./createCollection/index');
@@ -182,5 +563,24 @@ exports.main = async (event, context) => {
       return await insertRecord(event);
     case "deleteRecord":
       return await deleteRecord(event);
+    case "login":
+      return await login();
+    case "saveUserInfo":
+      return await saveUserInfo(event);
+    case "getUserInfo":
+      return await getUserInfo();
+    case "getUserStats":
+      return await getUserStats();
+    case "getRecentGames":
+      return await getRecentGames(event);
+    case "reportResult":
+      return await reportResult(event);
+    case "getRankList":
+      return await getRankList(event);
+    default:
+      return {
+        success: false,
+        errMsg: '未知的操作类型'
+      };
   }
 };

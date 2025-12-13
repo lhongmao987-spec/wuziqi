@@ -1,4 +1,21 @@
 <view class="page">
+  <view class="card user-info">
+    <view class="user-header">
+      <!-- 使用 chooseAvatar 方式获取头像 -->
+      <button wx:if="{{!userInfo.nickName}}" class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+        <image class="avatar" src="{{userInfo.avatarUrl || '/images/avatar.png'}}" mode="aspectFill"></image>
+      </button>
+      <image wx:else class="avatar" src="{{userInfo.avatarUrl || '/images/avatar.png'}}" mode="aspectFill"></image>
+      
+      <!-- 昵称输入框 -->
+      <input wx:if="{{!userInfo.nickName}}" class="nickname-input" type="nickname" placeholder="请输入昵称" value="{{tempNickName}}" bindinput="onNickNameInput" confirm-type="done"></input>
+      <view wx:else class="user-name">{{userInfo.nickName || '未登录'}}</view>
+      
+      <!-- 保存按钮：当选择了头像或输入了昵称后显示 -->
+      <button wx:if="{{!userInfo.nickName && (tempNickName || tempAvatarUrl)}}" class="save-btn" bindtap="handleSaveUserInfo" hover-class="save-btn-hover" type="default" size="default">保存信息</button>
+    </view>
+  </view>
+
   <view class="card">
     <view class="title">我的战绩</view>
     <view class="grid">
