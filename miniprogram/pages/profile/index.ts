@@ -76,7 +76,28 @@ Page({
   onChooseAvatar(e: WechatMiniprogram.ButtonChooseAvatar) {
     console.log('========== 选择头像 ==========');
     console.log('头像选择事件:', e);
+    
+    // 检查是否有错误
+    if (e.detail.errMsg && e.detail.errMsg.indexOf('fail') !== -1) {
+      console.error('选择头像失败:', e.detail.errMsg);
+      wx.showModal({
+        title: '提示',
+        content: '获取头像失败，请检查是否已同意隐私保护协议。如需使用此功能，请在设置中开启相关权限。',
+        showCancel: false,
+        confirmText: '知道了'
+      });
+      return;
+    }
+    
     const { avatarUrl } = e.detail;
+    if (!avatarUrl) {
+      wx.showToast({
+        title: '获取头像失败',
+        icon: 'none'
+      });
+      return;
+    }
+    
     console.log('选择的头像URL:', avatarUrl);
     
     this.setData({
@@ -93,6 +114,19 @@ Page({
   onNickNameInput(e: WechatMiniprogram.InputInput) {
     const nickName = e.detail.value;
     console.log('输入昵称:', nickName);
+    
+    // 检查是否有错误（隐私授权相关）
+    if (e.detail.errMsg && e.detail.errMsg.indexOf('fail') !== -1) {
+      console.error('输入昵称失败:', e.detail.errMsg);
+      wx.showModal({
+        title: '提示',
+        content: '获取昵称失败，请检查是否已同意隐私保护协议。如需使用此功能，请在设置中开启相关权限。',
+        showCancel: false,
+        confirmText: '知道了'
+      });
+      return;
+    }
+    
     this.setData({
       tempNickName: nickName
     });

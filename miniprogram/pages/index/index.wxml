@@ -45,14 +45,42 @@
 
   <view class="card invite-card">
     <view class="card-header">
-      <view class="card-title">邀请好友</view>
-      <view class="card-desc">分享给好友，一起享受五子棋的乐趣</view>
+      <view class="card-title">在线对战</view>
+      <view class="card-desc">创建房间或输入房间号加入对战</view>
     </view>
     <view class="controls">
-      <button class="invite-btn" open-type="share">
-        <text class="invite-icon">👥</text>
-        <text>邀请好友对战</text>
+      <button class="invite-btn" bindtap="createRoom">
+        <text class="invite-icon">🏠</text>
+        <text>创建房间</text>
       </button>
+      <button class="invite-btn secondary" bindtap="showJoinRoomModal">
+        <text class="invite-icon">🔢</text>
+        <text>加入房间</text>
+      </button>
+    </view>
+  </view>
+
+  <!-- 加入房间弹窗 -->
+  <view wx:if="{{showJoinModal}}" class="modal-overlay" bindtap="hideJoinRoomModal">
+    <view class="modal-content" catchtap="stopPropagation">
+      <view class="modal-header">
+        <view class="modal-title">输入房间号</view>
+        <view class="modal-close" bindtap="hideJoinRoomModal">×</view>
+      </view>
+      <view class="modal-body">
+        <input 
+          class="room-input" 
+          type="number" 
+          placeholder="请输入4位房间号"
+          maxlength="4"
+          value="{{roomIdInput}}"
+          bindinput="onRoomIdInput"
+        />
+      </view>
+      <view class="modal-footer">
+        <button class="modal-btn cancel" bindtap="hideJoinRoomModal">取消</button>
+        <button class="modal-btn confirm" bindtap="joinRoom">加入</button>
+      </view>
     </view>
   </view>
 </view>

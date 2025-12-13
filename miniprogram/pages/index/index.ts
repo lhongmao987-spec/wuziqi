@@ -11,7 +11,9 @@ Page({
       { label: '中级', value: 'MEDIUM' },
       { label: '高级', value: 'HARD' }
     ],
-    timeOptions: ['不限时', '每方 5 分钟', '每方 10 分钟']
+    timeOptions: ['不限时', '每方 5 分钟', '每方 10 分钟'],
+    showJoinModal: false,
+    roomIdInput: ''
   },
 
   selectPve() {
@@ -79,6 +81,135 @@ Page({
         content: '你的好友邀请你一起下五子棋！在线对战功能正在开发中，敬请期待。',
         showCancel: false,
         confirmText: '知道了'
+      });
+    }
+  },
+
+  // 创建房间
+  async createRoom() {
+    try {
+      wx.showLoading({ title: '创建中...' });
+
+      // 获取用户信息
+      const userInfo = wx.getStorageSync('userInfo') || {};
+      
+      const result = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'createRoom',
+          data: {
+            nickName: userInfo.nickName || '',
+            avatarUrl: userInfo.avatarUrl || ''
+          }
+        }
+      });
+
+      wx.hideLoading();
+
+      if (result.result.success) {
+        const room = result.result.data;
+        // 跳转到房间页面
+        wx.navigateTo({
+          url: `/pages/room/index?roomId=${room.roomId}&roomDocId=${room._id}&isCreator=true`
+        });
+      } else {
+        wx.showToast({
+          title: result.result.errMsg || '创建房间失败',
+          icon: 'none'
+        });
+      }
+    } catch (error: any) {
+      wx.hideLoading();
+      wx.showToast({
+        title: error.message || '创建房间失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  // 显示加入房间弹窗
+  showJoinRoomModal() {
+    this.setData({
+      showJoinModal: true,
+      roomIdInput: ''
+    });
+  },
+
+  // 隐藏加入房间弹窗
+  hideJoinRoomModal() {
+    this.setData({
+      showJoinModal: false,
+      roomIdInput: ''
+    });
+  },
+
+  // 阻止事件冒泡
+  stopPropagation() {
+    // 空函数，用于阻止点击弹窗内容时关闭弹窗
+  },
+
+  // 房间号输入
+  onRoomIdInput(e: WechatMiniprogram.Input) {
+    const value = e.detail.value.replace(/\D/g, ''); // 只保留数字
+    this.setData({
+      roomIdInput: value.slice(0, 4) // 最多4位
+    });
+  },
+
+  // 加入房间
+  async joinRoom() {
+    const roomId = this.data.roomIdInput.trim();
+    
+    if (!roomId || roomId.length !== 4) {
+      wx.showToast({
+        title: '请输入4位房间号',
+        icon: 'none'
+      });
+      return;
+    }
+
+    try {
+      wx.showLoading({ title: '加入中...' });
+
+      // 获取用户信息
+      const userInfo = wx.getStorageSync('userInfo') || {};
+
+      const result = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'joinRoom',
+          roomId: roomId,
+          data: {
+            nickName: userInfo.nickName || '',
+            avatarUrl: userInfo.avatarUrl || ''
+          }
+        }
+      });
+
+      wx.hideLoading();
+
+      if (result.result.success) {
+        const room = result.result.data;
+        // 跳转到房间页面
+        wx.navigateTo({
+          url: `/pages/room/index?roomId=${room.roomId}&roomDocId=${room._id}&isCreator=${result.result.isCreator ? 'true' : 'false'}`
+        });
+        // 关闭弹窗
+        this.setData({
+          showJoinModal: false,
+          roomIdInput: ''
+        });
+      } else {
+        wx.showToast({
+          title: result.result.errMsg || '加入房间失败',
+          icon: 'none'
+        });
+      }
+    } catch (error: any) {
+      wx.hideLoading();
+      wx.showToast({
+        title: error.message || '加入房间失败',
+        icon: 'none'
       });
     }
   }

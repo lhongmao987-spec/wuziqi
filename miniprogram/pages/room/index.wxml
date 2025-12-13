@@ -1,0 +1,54 @@
+<view class="page">
+  <view class="room-container">
+    <!-- 房间号显示 -->
+    <view class="room-header">
+      <view class="room-label">房间号</view>
+      <view class="room-id">{{roomId}}</view>
+      <view class="room-tip">分享房间号给好友即可加入</view>
+    </view>
+
+    <!-- 玩家信息 -->
+    <view class="players-section">
+      <view class="player-card {{isCreator ? 'creator' : ''}}">
+        <view class="player-avatar">
+          <image wx:if="{{creatorInfo.avatarUrl}}" src="{{creatorInfo.avatarUrl}}" mode="aspectFill"></image>
+          <view wx:else class="avatar-placeholder">{{creatorInfo.nickName ? creatorInfo.nickName.charAt(0) : 'A'}}</view>
+        </view>
+        <view class="player-info">
+          <view class="player-name">{{creatorInfo.nickName || '玩家1'}}</view>
+          <view class="player-role">房主</view>
+        </view>
+        <view class="player-status ready">✓</view>
+      </view>
+
+      <view class="player-card {{!isCreator && player2Info ? 'joined' : ''}}">
+        <view class="player-avatar">
+          <image wx:if="{{player2Info && player2Info.avatarUrl}}" src="{{player2Info.avatarUrl}}" mode="aspectFill"></image>
+          <view wx:else class="avatar-placeholder">?</view>
+        </view>
+        <view class="player-info">
+          <view class="player-name">{{player2Info ? player2Info.nickName : '等待玩家加入'}}</view>
+          <view class="player-role">玩家2</view>
+        </view>
+        <view class="player-status {{player2Info ? 'ready' : 'waiting'}}">
+          {{player2Info ? '✓' : '...'}}
+        </view>
+      </view>
+    </view>
+
+    <!-- 状态提示 -->
+    <view class="status-section">
+      <view class="status-text">{{statusText}}</view>
+    </view>
+
+    <!-- 操作按钮 -->
+    <view class="actions-section">
+      <button wx:if="{{isCreator && roomStatus === 'waiting'}}" class="action-btn primary" disabled>等待玩家加入...</button>
+      <button wx:if="{{isCreator && roomStatus === 'ready'}}" class="action-btn primary" bindtap="startGame">开始游戏</button>
+      <button wx:if="{{!isCreator && roomStatus === 'waiting'}}" class="action-btn primary" disabled>等待房主开始...</button>
+      <button wx:if="{{!isCreator && roomStatus === 'ready'}}" class="action-btn primary" disabled>等待房主开始...</button>
+      <button class="action-btn secondary" bindtap="leaveRoom">离开房间</button>
+    </view>
+  </view>
+</view>
+

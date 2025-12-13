@@ -17,4 +17,37 @@ App({
       });
     }
   },
+
+  // 处理隐私授权
+  onNeedPrivacyAuthorization(resolve) {
+    // 显示隐私授权弹窗
+    wx.showModal({
+      title: '用户隐私保护指引',
+      content: '我们需要获取您的头像和昵称信息，用于完善个人资料和游戏体验。',
+      confirmText: '同意',
+      cancelText: '拒绝',
+      success: (res) => {
+        if (res.confirm) {
+          // 用户同意，调用 resolve
+          resolve({
+            buttonId: 'agree',
+            event: 'agree'
+          });
+        } else {
+          // 用户拒绝
+          resolve({
+            buttonId: 'disagree',
+            event: 'disagree'
+          });
+        }
+      },
+      fail: () => {
+        // 弹窗失败，默认拒绝
+        resolve({
+          buttonId: 'disagree',
+          event: 'disagree'
+        });
+      }
+    });
+  }
 });

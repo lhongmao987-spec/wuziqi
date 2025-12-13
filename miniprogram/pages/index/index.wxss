@@ -194,3 +194,108 @@ page {
 .invite-icon {
   font-size: 36rpx;
 }
+
+.invite-btn.secondary {
+  background: transparent;
+  border: 1px solid #3b82f6;
+  color: #3b82f6;
+}
+
+.invite-btn.secondary:active {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* 弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #111827;
+  border-radius: 20rpx;
+  width: 600rpx;
+  max-width: 90%;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32rpx;
+  border-bottom: 1px solid #1f2937;
+}
+
+.modal-title {
+  color: #f1f5f9;
+  font-size: 36rpx;
+  font-weight: 600;
+}
+
+.modal-close {
+  color: #94a3b8;
+  font-size: 48rpx;
+  line-height: 1;
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-body {
+  padding: 32rpx;
+}
+
+.room-input {
+  width: 100%;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 12rpx;
+  padding: 24rpx;
+  color: #f1f5f9;
+  font-size: 32rpx;
+  text-align: center;
+  letter-spacing: 8rpx;
+  font-family: 'Courier New', monospace;
+}
+
+.room-input::placeholder {
+  color: #64748b;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 16rpx;
+  padding: 24rpx 32rpx;
+  border-top: 1px solid #1f2937;
+}
+
+.modal-btn {
+  flex: 1;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  border: none;
+}
+
+.modal-btn.cancel {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #1f2937;
+}
+
+.modal-btn.confirm {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #ffffff;
+}

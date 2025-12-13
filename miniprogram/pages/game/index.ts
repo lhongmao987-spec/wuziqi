@@ -24,6 +24,12 @@ Page({
     enableSound: true,
     winningPositions: [] as Array<{ x: number; y: number }>, // 获胜的五子位置
     isProcessingMove: false, // 标记是否正在处理落子，防止快速连续点击
+    // 在线对战相关
+    gameId: '',
+    roomDocId: '',
+    isCreator: false,
+    myPlayer: Player.Black, // 当前玩家的身份（黑或白）
+    gameWatcher: null as any, // 游戏状态监听器
   },
 
   onLoad(query: Record<string, string>) {
@@ -85,7 +91,12 @@ Page({
       }
     } else {
       // 初始化新游戏
-      this.initNewGame(query);
+      if (query.mode === GameMode.PVP_ONLINE) {
+        // 在线对战模式
+        this.initOnlineGame(query);
+      } else {
+        this.initNewGame(query);
+      }
     }
 
     this.startTick();
@@ -122,6 +133,150 @@ Page({
     core.init(config);
   },
 
+  // 初始化在线对战
+  async initOnlineGame(query: Record<string, string>) {
+    const gameId = query.gameId;
+    const roomDocId = query.roomDocId;
+    const isCreator = query.isCreator === 'true';
+
+    if (!gameId) {
+      wx.showToast({
+        title: '游戏ID错误',
+        icon: 'none'
+      });
+      setTimeout(() => {
+        wx.navigateBack();
+      }, 1500);
+      return;
+    }
+
+    this.setData({
+      gameId: gameId,
+      roomDocId: roomDocId || '',
+      isCreator: isCreator,
+      myPlayer: isCreator ? Player.Black : Player.White, // 创建者是黑棋，加入者是白棋
+      modeLabel: '在线对战',
+      opponentLabel: '在线玩家'
+    });
+
+    // 加载游戏状态
+    await this.loadGameState();
+    
+    // 开始监听游戏状态
+    this.watchGameState();
+  },
+
+  // 加载游戏状态
+  async loadGameState() {
+    try {
+      const result = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'getGameState',
+          gameId: this.data.gameId
+        }
+      });
+
+      if (result.result.success) {
+        const game = result.result.data;
+        
+        // 读取游戏设置
+        const settings = wx.getStorageSync('gameSettings') || {};
+        
+        if (game.gameState) {
+          // 恢复游戏状态
+          core.restoreState(game.gameState);
+          const state = core.getState();
+          this.updateState(state);
+        } else {
+          // 初始化新游戏
+          const config: GameConfig = {
+            boardSize: 15,
+            ruleSet: 'STANDARD',
+            enableForbidden: settings.enableForbidden !== undefined ? settings.enableForbidden : false,
+            allowUndo: false, // 在线对战不允许悔棋
+            mode: GameMode.PVP_ONLINE,
+            timeLimitPerMove: 60, // 每步60秒
+          };
+          
+          core.init(config);
+          
+          // 保存初始状态到数据库
+          const state = core.getState();
+          await this.syncGameState(state);
+        }
+      } else {
+        wx.showToast({
+          title: result.result.errMsg || '加载游戏失败',
+          icon: 'none'
+        });
+      }
+    } catch (error: any) {
+      wx.showToast({
+        title: error.message || '加载游戏失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  // 监听游戏状态变化
+  watchGameState() {
+    if (!this.data.gameId) {
+      return;
+    }
+
+    const db = wx.cloud.database();
+    const watcher = db.collection('games').doc(this.data.gameId).watch({
+      onChange: (snapshot) => {
+        if (snapshot.type === 'update' && snapshot.doc) {
+          const game = snapshot.doc;
+          if (game.gameState) {
+            // 检查是否是对方的落子
+            const remoteState = game.gameState as GameState;
+            const localState = core.getState();
+            
+            // 如果对方的moves数量更多，说明对方落子了
+            if (remoteState.moves.length > localState.moves.length) {
+              // 恢复远程状态
+              core.restoreState(remoteState);
+              const state = core.getState();
+              this.updateState(state);
+              
+              // 播放落子音效
+              if (this.data.enableSound) {
+                this.playSound('move');
+              }
+            }
+          }
+        }
+      },
+      onError: (error) => {
+        console.error('监听游戏状态失败:', error);
+      }
+    });
+
+    this.setData({
+      gameWatcher: watcher
+    });
+  },
+
+  // 同步游戏状态到数据库
+  async syncGameState(state: GameState, move?: any) {
+    try {
+      await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'updateGameState',
+          gameId: this.data.gameId,
+          gameState: state,
+          move: move
+        }
+      });
+    } catch (error) {
+      console.error('同步游戏状态失败:', error);
+    }
+  },
+
   onShow() {
     // 从设置页面返回时，重新读取设置并更新（高亮和音效可以随时更新）
     const settings = wx.getStorageSync('gameSettings') || {};
@@ -138,15 +293,24 @@ Page({
 
   onUnload() {
     this.stopTick();
+    
+    // 停止监听
+    if (this.data.gameWatcher) {
+      this.data.gameWatcher.close();
+    }
+    
     // 页面卸载时保存游戏状态（如果游戏还在进行中）
     const state = core.getState();
-    if (state.phase === GamePhase.Playing && state.result === GameResult.Ongoing) {
-      const storageKey = getStorageKey(state.config.mode);
-      wx.setStorageSync(storageKey, state);
-    } else {
-      // 游戏已结束，清除保存的状态
-      const storageKey = getStorageKey(state.config.mode);
-      wx.removeStorageSync(storageKey);
+    if (state.config.mode !== GameMode.PVP_ONLINE) {
+      // 非在线对战模式才保存到本地
+      if (state.phase === GamePhase.Playing && state.result === GameResult.Ongoing) {
+        const storageKey = getStorageKey(state.config.mode);
+        wx.setStorageSync(storageKey, state);
+      } else {
+        // 游戏已结束，清除保存的状态
+        const storageKey = getStorageKey(state.config.mode);
+        wx.removeStorageSync(storageKey);
+      }
     }
   },
 
@@ -260,13 +424,18 @@ Page({
     });
   },
 
-  handleGameOver(state: GameState) {
+  async handleGameOver(state: GameState) {
     // 立即停止tick定时器，避免在结算页面继续执行
     // 使用同步方式立即清除，确保定时器被停止
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = 0;
       console.log('handleGameOver: 已清除tick定时器');
+    }
+    
+    // 在线对战模式：同步最终状态到数据库
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      await this.syncGameState(state);
     }
     
     // 播放游戏结束音效
@@ -279,8 +448,10 @@ Page({
     }
     
     // 游戏结束，清除保存的状态（根据模式清除对应的状态）
-    const storageKey = getStorageKey(state.config.mode);
-    wx.removeStorageSync(storageKey);
+    if (state.config.mode !== GameMode.PVP_ONLINE) {
+      const storageKey = getStorageKey(state.config.mode);
+      wx.removeStorageSync(storageKey);
+    }
     wx.setStorageSync('lastConfig', state.config);
     const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}`;
     
@@ -326,6 +497,17 @@ Page({
       return;
     }
     
+    // 在线对战模式：检查是否是自己的回合
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      if (state.currentPlayer !== this.data.myPlayer) {
+        wx.showToast({
+          title: '等待对方落子',
+          icon: 'none'
+        });
+        return;
+      }
+    }
+    
     // 在人机模式下，需要防抖机制和安全超时
     if (state.config.mode === GameMode.PVE) {
       // 使用同步变量立即阻止重复点击（不依赖异步的setData）
@@ -360,10 +542,19 @@ Page({
       // 执行落子（这是同步调用，会立即执行）
       core.handlePlayerMove(Number(x), Number(y));
       
+      const stateAfterMove = core.getState();
+      const lastMove = stateAfterMove.moves[stateAfterMove.moves.length - 1];
+      
+      // 在线对战模式：同步游戏状态到数据库
+      if (state.config.mode === GameMode.PVP_ONLINE) {
+        this.syncGameState(stateAfterMove, lastMove).catch(err => {
+          console.error('同步游戏状态失败:', err);
+        });
+      }
+      
       // 执行落子后，立即检查状态，确保标志不会被意外重置
       // 只在人机模式下处理标志
       if (state.config.mode === GameMode.PVE) {
-        const stateAfterMove = core.getState();
         if (stateAfterMove.currentPlayer === Player.White) {
           // 玩家已下完，当前轮到AI，保持标志为true，等待AI下完
           console.log('玩家已下完，等待AI落子，保持处理标志');
@@ -424,6 +615,15 @@ Page({
   },
 
   handleUndo() {
+    const state = core.getState();
+    // 在线对战不允许悔棋
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      wx.showToast({
+        title: '在线对战不允许悔棋',
+        icon: 'none'
+      });
+      return;
+    }
     core.handleUndo();
   },
 

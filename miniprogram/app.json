@@ -5,7 +5,8 @@
     "pages/profile/index",
     "pages/settings/index",
     "pages/game/index",
-    "pages/result/index"
+    "pages/result/index",
+    "pages/room/index"
   ],
   "window": {
     "backgroundColor": "#0f172a",
@@ -49,10 +50,5 @@
   "sitemapLocation": "sitemap.json",
   "style": "v2",
   "lazyCodeLoading": "requiredComponents",
-  "__usePrivacyCheck__": true,
-  "permission": {
-    "scope.userInfo": {
-      "desc": "用于完善用户资料"
-    }
-  }
+  "__usePrivacyCheck__": true
 }
