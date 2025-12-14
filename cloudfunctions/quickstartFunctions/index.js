@@ -4,6 +4,11 @@ cloud.init({
 });
 
 const db = cloud.database();
+const _ = db.command;
+
+// 引入服务模块
+const statsService = require('./services/statsService');
+const leaderboardService = require('./services/leaderboardService');
 // 获取openid
 const getOpenId = async () => {
   // 获取基础信息
@@ -76,28 +81,62 @@ const saveUserInfo = async (event) => {
     const openid = wxContext.OPENID;
     const userInfo = event.data;
     
+    // 构建更新数据
+    const updateData = {
+      nickName: userInfo.nickName || '',
+      updateTime: new Date()
+    };
+    
+    // 处理头像：优先使用 avatarFileId（云存储 fileID）
+    if (userInfo.avatarFileId) {
+      // 有 fileID，保存 fileID，并清空旧的 avatarUrl（如果存在）
+      updateData.avatarFileId = userInfo.avatarFileId;
+      updateData.avatarUrl = ''; // 清空旧的 avatarUrl
+    } else if (userInfo.avatarUrl) {
+      // 有 avatarUrl（https 链接），保存 avatarUrl
+      // 过滤掉临时路径（127.0.0.1、__tmp__ 等）
+      const avatarUrl = userInfo.avatarUrl;
+      if (avatarUrl.includes('127.0.0.1') || 
+          avatarUrl.includes('__tmp__') || 
+          avatarUrl.startsWith('wxfile://') ||
+          avatarUrl.startsWith('http://localhost') ||
+          (avatarUrl.startsWith('http://') && !avatarUrl.startsWith('https://'))) {
+        // 临时路径，不保存
+        console.warn('检测到临时路径，不保存:', avatarUrl);
+      } else {
+        updateData.avatarUrl = avatarUrl;
+      }
+    }
+    
     // 更新用户信息
     const updateResult = await db.collection('users').where({
       _openid: openid
     }).update({
-      data: {
-        nickName: userInfo.nickName || '',
-        avatarUrl: userInfo.avatarUrl || '',
-        updateTime: new Date()
-      }
+      data: updateData
     });
     
     if (updateResult.stats.updated === 0) {
       // 如果更新失败，可能是用户不存在，创建新记录
       const now = new Date();
+      const newUserData = {
+        _openid: openid,
+        nickName: userInfo.nickName || '',
+        createTime: now,
+        updateTime: now
+      };
+      
+      // 添加头像字段
+      if (userInfo.avatarFileId) {
+        newUserData.avatarFileId = userInfo.avatarFileId;
+        newUserData.avatarUrl = '';
+      } else if (userInfo.avatarUrl && 
+                 !userInfo.avatarUrl.includes('127.0.0.1') && 
+                 !userInfo.avatarUrl.includes('__tmp__')) {
+        newUserData.avatarUrl = userInfo.avatarUrl;
+      }
+      
       await db.collection('users').add({
-        data: {
-          _openid: openid,
-          nickName: userInfo.nickName || '',
-          avatarUrl: userInfo.avatarUrl || '',
-          createTime: now,
-          updateTime: now
-        }
+        data: newUserData
       });
     }
     
@@ -106,9 +145,27 @@ const saveUserInfo = async (event) => {
       _openid: openid
     }).get();
     
+    const savedUser = userResult.data[0] || null;
+    
+    // 如果有 avatarFileId，转换为 https URL 返回
+    if (savedUser && savedUser.avatarFileId) {
+      try {
+        const tempFileURL = await cloud.getTempFileURL({
+          fileList: [savedUser.avatarFileId]
+        });
+        if (tempFileURL.fileList && tempFileURL.fileList.length > 0) {
+          savedUser.avatarUrl = tempFileURL.fileList[0].tempFileURL;
+        }
+      } catch (e) {
+        console.error('转换 fileID 失败:', e);
+        // 转换失败，返回空字符串，前端会使用默认头像
+        savedUser.avatarUrl = '';
+      }
+    }
+    
     return {
       success: true,
-      data: userResult.data[0] || null
+      data: savedUser
     };
   } catch (e) {
     return {
@@ -129,9 +186,39 @@ const getUserInfo = async () => {
     }).get();
     
     if (userResult.data.length > 0) {
+      const userInfo = userResult.data[0];
+      
+      // 如果有 avatarFileId，转换为 https URL
+      if (userInfo.avatarFileId) {
+        try {
+          const tempFileURLResult = await cloud.getTempFileURL({
+            fileList: [userInfo.avatarFileId]
+          });
+          if (tempFileURLResult.fileList && tempFileURLResult.fileList.length > 0) {
+            userInfo.avatarUrl = tempFileURLResult.fileList[0].tempFileURL;
+          } else {
+            userInfo.avatarUrl = '';
+          }
+        } catch (e) {
+          console.error('转换 fileID 失败:', e);
+          userInfo.avatarUrl = '';
+        }
+      } else if (userInfo.avatarUrl) {
+        // 过滤掉临时路径
+        const avatarUrl = userInfo.avatarUrl;
+        if (avatarUrl.includes('127.0.0.1') || 
+            avatarUrl.includes('__tmp__') || 
+            avatarUrl.startsWith('wxfile://') ||
+            avatarUrl.startsWith('http://localhost') ||
+            (avatarUrl.startsWith('http://') && !avatarUrl.startsWith('https://'))) {
+          // 临时路径，返回空字符串
+          userInfo.avatarUrl = '';
+        }
+      }
+      
       return {
         success: true,
-        data: userResult.data[0]
+        data: userInfo
       };
     } else {
       return {
@@ -263,202 +350,43 @@ const getRecentGames = async (event) => {
   }
 };
 
-// 计算评分公式：score = winRate * 100 + ln(totalGames) * 20
-const calculateScore = (winCount, totalGames) => {
-  if (totalGames < 1) {
-    return 0;
-  }
-  const winRate = winCount / totalGames;
-  const logPart = totalGames >= 1 ? Math.log(totalGames) * 20 : 0;
-  return winRate * 100 + logPart;
-};
-
-// 更新用户战绩（对局结束时调用）
-// 支持原子更新，避免并发问题
-const updateUserStatsAfterGame = async (event) => {
-  try {
-    const wxContext = cloud.getWXContext();
-    const openid = wxContext.OPENID;
-    const { result, nickName, avatarUrl, gameMode, opponentType } = event.data || {};
-    
-    // 参数校验
-    if (!result || !['win', 'lose', 'draw'].includes(result)) {
-      return {
-        success: false,
-        errMsg: '参数错误：result 必须是 win/lose/draw'
-      };
-    }
-    
-    // 获取或创建用户信息
-    let userInfo = null;
-    const userResult = await db.collection('users').where({
-      _openid: openid
-    }).get();
-    
-    if (userResult.data.length > 0) {
-      userInfo = userResult.data[0];
-    } else {
-      // 如果用户不存在，创建基础记录
-      const now = new Date();
-      const newUser = {
-        _openid: openid,
-        nickName: nickName || '',
-        avatarUrl: avatarUrl || '',
-        createTime: now,
-        updateTime: now
-      };
-      const addResult = await db.collection('users').add({ data: newUser });
-      userInfo = { _id: addResult._id, ...newUser };
-    }
-    
-    // 同步昵称和头像（如果传入）
-    if (nickName || avatarUrl) {
-      const updateData = {};
-      if (nickName) updateData.nickName = nickName;
-      if (avatarUrl) updateData.avatarUrl = avatarUrl;
-      updateData.updateTime = new Date();
-      await db.collection('users').where({ _openid: openid }).update({ data: updateData });
-      if (userInfo) {
-        Object.assign(userInfo, updateData);
-      }
-    }
-    
-    // 查询现有战绩
-    const statsResult = await db.collection('userStats').where({
-      _openid: openid
-    }).get();
-    
-    const now = new Date();
-    let finalStats = null;
-    
-    if (statsResult.data.length > 0) {
-      // 更新现有战绩（使用原子操作）
-      const oldStats = statsResult.data[0];
-      
-      // 使用数据库原子自增操作
-      const updateData = {
-        totalGames: db.command.inc(1),
-        updateTime: now
-      };
-      
-      if (result === 'win') {
-        updateData.winCount = db.command.inc(1);
-        updateData.currentStreak = db.command.inc(1);
-        // maxStreak 需要特殊处理，因为要取 max(oldMaxStreak, newCurrentStreak)
-        // 这里先自增，然后在事务外再处理 maxStreak
-      } else if (result === 'lose') {
-        updateData.loseCount = db.command.inc(1);
-        updateData.currentStreak = 0;
-      } else if (result === 'draw') {
-        updateData.drawCount = db.command.inc(1);
-        updateData.currentStreak = 0;
-      }
-      
-      // 同步昵称和头像
-      if (userInfo) {
-        if (userInfo.nickName) updateData.nickName = userInfo.nickName;
-        if (userInfo.avatarUrl) updateData.avatarUrl = userInfo.avatarUrl;
-      }
-      
-      // 执行原子更新
-      await db.collection('userStats').where({
-        _openid: openid
-      }).update({ data: updateData });
-      
-      // 重新查询获取最新数据，用于计算 score 和 maxStreak
-      const updatedResult = await db.collection('userStats').where({
-        _openid: openid
-      }).get();
-      
-      if (updatedResult.data.length > 0) {
-        const newStats = updatedResult.data[0];
-        const newTotalGames = newStats.totalGames || 0;
-        const newWinCount = newStats.winCount || 0;
-        const newCurrentStreak = newStats.currentStreak || 0;
-        
-        // 处理 maxStreak（如果是胜利，需要比较）
-        let newMaxStreak = newStats.maxStreak || 0;
-        if (result === 'win') {
-          newMaxStreak = Math.max(newMaxStreak, newCurrentStreak);
-        }
-        
-        // 计算胜率
-        const winRate = newTotalGames > 0 ? newWinCount / newTotalGames : 0;
-        
-        // 计算新评分
-        const newScore = calculateScore(newWinCount, newTotalGames);
-        
-        // 更新 score、maxStreak、winRate
-        await db.collection('userStats').where({
-          _openid: openid
-        }).update({
-          data: {
-            maxStreak: newMaxStreak,
-            score: newScore,
-            winRate: winRate
-          }
-        });
-        
-        // 返回最终数据
-        finalStats = {
-          ...newStats,
-          maxStreak: newMaxStreak,
-          score: newScore,
-          winRate: winRate
-        };
-      }
-    } else {
-      // 创建新战绩记录
-      const newTotalGames = 1;
-      const newWinCount = result === 'win' ? 1 : 0;
-      const newLoseCount = result === 'lose' ? 1 : 0;
-      const newDrawCount = result === 'draw' ? 1 : 0;
-      const newCurrentStreak = result === 'win' ? 1 : 0;
-      const newMaxStreak = result === 'win' ? 1 : 0;
-      const winRate = result === 'win' ? 1 : 0;
-      const newScore = calculateScore(newWinCount, newTotalGames);
-      
-      const newStats = {
-        _openid: openid,
-        nickName: userInfo ? (userInfo.nickName || '') : '',
-        avatarUrl: userInfo ? (userInfo.avatarUrl || '') : '',
-        totalGames: newTotalGames,
-        winCount: newWinCount,
-        loseCount: newLoseCount,
-        drawCount: newDrawCount,
-        currentStreak: newCurrentStreak,
-        maxStreak: newMaxStreak,
-        winRate: winRate,
-        score: newScore,
-        createTime: now,
-        updateTime: now
-      };
-      
-      await db.collection('userStats').add({ data: newStats });
-      finalStats = newStats;
-    }
-    
-    return {
-      success: true,
-      data: {
-        stats: finalStats,
-        message: '战绩已更新'
-      }
-    };
-  } catch (e) {
-    return {
-      success: false,
-      errMsg: e.message || e.toString()
-    };
-  }
-};
+// 使用服务模块中的函数
+const calculateScore = statsService.calculateScore;
+const updateUserStatsAfterGame = statsService.updateUserStatsAfterGame;
 
 // 上报对局结果（兼容旧接口，内部调用 updateUserStatsAfterGame）
+// 实现幂等性：通过 dedupeKey 防止重复上报
 const reportResult = async (event) => {
   try {
     const wxContext = cloud.getWXContext();
     const openid = wxContext.OPENID;
     const gameData = event.data;
+    
+    // 获取 dedupeKey（去重键）
+    const dedupeKey = gameData.dedupeKey;
+    if (!dedupeKey) {
+      return {
+        success: false,
+        errMsg: '参数错误：dedupeKey 不能为空'
+      };
+    }
+    
+    // 幂等性检查：查询是否已存在相同 dedupeKey 的记录（同一玩家维度）
+    const existingRecord = await db.collection('gameRecords').where({
+      playerOpenId: openid,
+      dedupeKey: dedupeKey
+    }).get();
+    
+    if (existingRecord.data.length > 0) {
+      // 已上报过，直接返回成功，但不重复更新 userStats
+      return {
+        success: true,
+        data: {
+          alreadyReported: true,
+          message: '该对局已上报过，不会重复统计'
+        }
+      };
+    }
     
     // 转换结果格式：'胜'/'负'/'和' -> 'win'/'lose'/'draw'
     let result = 'lose';
@@ -476,7 +404,7 @@ const reportResult = async (event) => {
     }).get();
     const userInfo = userResult.data.length > 0 ? userResult.data[0] : null;
     
-    // 1. 保存对局记录到 gameRecords
+    // 1. 保存对局记录到 gameRecords（包含 dedupeKey）
     const gameRecord = {
       playerOpenId: openid,
       opponentType: gameData.opponentType || 'AI',
@@ -487,6 +415,7 @@ const reportResult = async (event) => {
       duration: gameData.duration || 0,
       difficulty: gameData.difficulty || '',
       gameMode: gameData.gameMode || 'PVE',
+      dedupeKey: dedupeKey, // 去重键
       createTime: new Date()
     };
     
@@ -1031,181 +960,8 @@ const getGameState = async (event) => {
   }
 };
 
-// 排行榜上榜门槛（常量）
-const LEADERBOARD_MIN_GAMES = 5;
-
-// 获取排行榜（新版本，支持完整排序和排名计算）
-const getLeaderboard = async (event) => {
-  try {
-    const limit = event.limit || 50;
-    const skip = event.skip || 0;
-    
-    // 获取当前用户openid
-    const wxContext = cloud.getWXContext();
-    const currentUserOpenId = wxContext.OPENID;
-    
-    // 查询上榜用户（totalGames >= LEADERBOARD_MIN_GAMES）
-    // 注意：微信云数据库不支持多字段排序，只能按一个字段排序
-    // 先按 score 降序查询，然后在内存中处理同分情况
-    const result = await db.collection('userStats')
-      .where({
-        totalGames: db.command.gte(LEADERBOARD_MIN_GAMES)
-      })
-      .orderBy('score', 'desc')
-      .limit(1000) // 先取足够多的数据，在内存中排序
-      .get();
-    
-    // 在内存中进行完整排序（处理同分情况）
-    const allRankedUsers = result.data.sort((a, b) => {
-      // 1. 按 score 降序
-      if (b.score !== a.score) {
-        return b.score - a.score;
-      }
-      // 2. score 相同，按 winCount 降序
-      if (b.winCount !== a.winCount) {
-        return b.winCount - a.winCount;
-      }
-      // 3. score 和 winCount 都相同，按 updateTime 升序（更早的在前）
-      const timeA = a.updateTime ? new Date(a.updateTime).getTime() : 0;
-      const timeB = b.updateTime ? new Date(b.updateTime).getTime() : 0;
-      return timeA - timeB;
-    });
-    
-    // 分页处理
-    const paginatedList = allRankedUsers.slice(skip, skip + limit);
-    
-    // 格式化返回数据，确保所有字段都有默认值
-    const rankList = paginatedList.map((item, index) => {
-      // 计算胜率（确保不会出现NaN或Infinity）
-      const totalGames = item.totalGames || 0;
-      const winCount = item.winCount || 0;
-      const winRate = totalGames > 0 ? winCount / totalGames : 0;
-      
-      // 确保score存在，如果不存在则计算
-      let score = item.score;
-      if (score === undefined || score === null) {
-        score = calculateScore(winCount, totalGames);
-      }
-      
-      return {
-        rank: skip + index + 1, // 实际排名（考虑分页）
-        nickName: item.nickName || '未命名',
-        avatarUrl: item.avatarUrl || '',
-        openid: item._openid || '',
-        winCount: winCount,
-        loseCount: item.loseCount || 0,
-        totalGames: totalGames,
-        maxStreak: item.maxStreak || 0,
-        winRate: Math.round(winRate * 100) / 100, // 保留2位小数（0-1之间）
-        score: score
-      };
-    });
-    
-    // 计算当前用户排名和信息
-    let currentUserInfo = null;
-    if (currentUserOpenId) {
-      // 查询当前用户战绩
-      const userStatsResult = await db.collection('userStats').where({
-        _openid: currentUserOpenId
-      }).get();
-      
-      if (userStatsResult.data.length > 0) {
-        const userStats = userStatsResult.data[0];
-        const userTotalGames = userStats.totalGames || 0;
-        const userScore = userStats.score || 0;
-        const userWinCount = userStats.winCount || 0;
-        const userUpdateTime = userStats.updateTime ? new Date(userStats.updateTime).getTime() : 0;
-        
-        // 计算胜率
-        const userWinRate = userTotalGames > 0 ? (userWinCount || 0) / userTotalGames : 0;
-        
-        if (userTotalGames >= LEADERBOARD_MIN_GAMES) {
-          // 用户已上榜，计算排名
-          // 统计比当前用户排名高的用户数量
-          let rank = 1;
-          for (const user of allRankedUsers) {
-            // 如果找到当前用户，停止计数
-            if (user._openid === currentUserOpenId) {
-              break;
-            }
-            
-            const otherScore = user.score || 0;
-            const otherWinCount = user.winCount || 0;
-            const otherUpdateTime = user.updateTime ? new Date(user.updateTime).getTime() : 0;
-            
-            // 判断是否排名更高（按排序规则）
-            if (otherScore > userScore) {
-              rank++;
-            } else if (otherScore === userScore) {
-              if (otherWinCount > userWinCount) {
-                rank++;
-              } else if (otherWinCount === userWinCount) {
-                if (otherUpdateTime < userUpdateTime) {
-                  rank++;
-                }
-              }
-            }
-          }
-          
-          currentUserInfo = {
-            rank: rank,
-            notRanked: false,
-            stats: {
-              openid: currentUserOpenId, // 添加openid用于前端判断
-              nickName: userStats.nickName || '未命名',
-              avatarUrl: userStats.avatarUrl || '',
-              winCount: userStats.winCount || 0,
-              loseCount: userStats.loseCount || 0,
-              totalGames: userTotalGames,
-              maxStreak: userStats.maxStreak || 0,
-              winRate: Math.round(userWinRate * 100) / 100, // 保持小数格式，前端会转换
-              score: userScore
-            }
-          };
-        } else {
-          // 用户未上榜
-          const needGames = LEADERBOARD_MIN_GAMES - userTotalGames;
-          currentUserInfo = {
-            notRanked: true,
-            needGames: needGames,
-            stats: {
-              openid: currentUserOpenId, // 添加openid用于前端判断
-              nickName: userStats.nickName || '未命名',
-              avatarUrl: userStats.avatarUrl || '',
-              winCount: userStats.winCount || 0,
-              loseCount: userStats.loseCount || 0,
-              totalGames: userTotalGames,
-              maxStreak: userStats.maxStreak || 0,
-              winRate: Math.round(userWinRate * 100) / 100, // 保持小数格式，前端会转换
-              score: userScore
-            }
-          };
-        }
-      } else {
-        // 用户没有战绩记录
-        currentUserInfo = {
-          notRanked: true,
-          needGames: LEADERBOARD_MIN_GAMES,
-          stats: null
-        };
-      }
-    }
-    
-    return {
-      success: true,
-      data: {
-        list: rankList,
-        total: allRankedUsers.length,
-        currentUser: currentUserInfo
-      }
-    };
-  } catch (e) {
-    return {
-      success: false,
-      errMsg: e.message || e.toString()
-    };
-  }
-};
+// 使用服务模块中的排行榜函数
+const getLeaderboard = leaderboardService.getLeaderboard;
 
 // 获取排行榜（兼容旧接口）
 const getRankList = async (event) => {

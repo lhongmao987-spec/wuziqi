@@ -25,6 +25,7 @@ Page({
     winningPositions: [] as Array<{ x: number; y: number }>, // 获胜的五子位置
     isProcessingMove: false, // 标记是否正在处理落子，防止快速连续点击
     gameStartTime: null as number | null, // 对局开始时间戳
+    clientGameId: '', // 客户端生成的游戏ID（用于去重，PVE/PVP_LOCAL模式）
     // 在线对战相关
     gameId: '',
     roomDocId: '',
@@ -133,9 +134,15 @@ Page({
 
     core.init(config);
     
-    // 记录游戏开始时间
+    // 记录游戏开始时间并生成clientGameId（用于去重）
+    const gameStartTime = Date.now();
+    const openid = wx.getStorageSync('openid') || 'anonymous';
+    const random = Math.floor(Math.random() * 10000);
+    const clientGameId = `${openid}_${gameStartTime}_${random}`;
+    
     this.setData({
-      gameStartTime: Date.now()
+      gameStartTime: gameStartTime,
+      clientGameId: clientGameId
     });
   },
 
@@ -207,9 +214,10 @@ Page({
           
           core.init(config);
           
-          // 记录游戏开始时间
+          // 记录游戏开始时间并生成clientGameId（在线对战使用gameId作为dedupeKey）
+          const gameStartTime = Date.now();
           this.setData({
-            gameStartTime: Date.now()
+            gameStartTime: gameStartTime
           });
           
           // 保存初始状态到数据库
@@ -504,6 +512,17 @@ Page({
     const gameStartTime = this.data.gameStartTime || Date.now();
     const duration = Math.max(0, Math.floor((Date.now() - gameStartTime) / 1000));
     
+    // 生成dedupeKey（去重键）
+    let dedupeKey = '';
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      // 在线对战：使用gameId或roomId + endedAt
+      const endedAt = Math.floor(Date.now() / 1000); // 秒级时间戳
+      dedupeKey = this.data.gameId || `${this.data.roomDocId}_${endedAt}`;
+    } else {
+      // 人机/本地：使用clientGameId
+      dedupeKey = this.data.clientGameId || '';
+    }
+    
     // 构建跳转参数
     const params = [
       `result=${state.result}`,
@@ -514,7 +533,8 @@ Page({
       `opponentType=${state.config.mode === GameMode.PVE ? 'AI' : state.config.mode === GameMode.PVP_ONLINE ? '玩家' : ''}`,
       `opponentName=${state.config.mode === GameMode.PVE ? 'AI' : state.config.mode === GameMode.PVP_ONLINE ? '在线玩家' : ''}`,
       `difficulty=${state.config.aiLevel || ''}`,
-      `duration=${duration}`
+      `duration=${duration}`,
+      `dedupeKey=${dedupeKey}`
     ].filter(p => p.split('=')[1] !== '').join('&');
     
     // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时

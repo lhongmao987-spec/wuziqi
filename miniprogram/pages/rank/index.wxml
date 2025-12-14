@@ -21,7 +21,14 @@
             </view>
             <!-- 中间用户区 -->
             <view class="user-area">
-              <image class="avatar" src="{{item.avatarUrl || '/images/avatar.png'}}" mode="aspectFill"></image>
+              <image 
+                class="avatar" 
+                src="{{item.avatarUrl || '/images/icons/avatar.png'}}" 
+                mode="aspectFill"
+                lazy-load="true"
+                binderror="onAvatarError"
+                data-index="{{index}}"
+              ></image>
               <view class="user-info">
                 <view class="name">{{item.name || '未命名'}}</view>
                 <view class="sub-info">胜率{{item.winRate || 0}}% · 共{{item.totalGames || 0}}场</view>
@@ -35,10 +42,16 @@
           </view>
         </block>
         <!-- 当前用户排名提示 -->
-        <view wx:if="{{currentUser && !currentUser.notRanked}}" class="rank-footer">
+        <!-- 未登录：显示登录提示 -->
+        <view wx:if="{{!currentUser || currentUser.notLogin}}" class="rank-footer">
+          <view class="rank-footer-text">未登录，登录后显示我的排名</view>
+        </view>
+        <!-- 已登录且已上榜：显示排名 -->
+        <view wx:elif="{{currentUser && !currentUser.notLogin && !currentUser.notRanked && currentUser.rank}}" class="rank-footer">
           <view class="rank-footer-text">你当前排名：第 {{currentUser.rank}} 名</view>
         </view>
-        <view wx:elif="{{currentUser && currentUser.notRanked && !loading}}" class="rank-footer">
+        <!-- 已登录但未上榜：显示未上榜提示 -->
+        <view wx:elif="{{currentUser && !currentUser.notLogin && currentUser.notRanked && !loading}}" class="rank-footer">
           <view class="rank-footer-text">未上榜（至少对战 5 场）<text wx:if="{{currentUser.needGames > 0}}">，还差 {{currentUser.needGames}} 场</text></view>
         </view>
       </view>

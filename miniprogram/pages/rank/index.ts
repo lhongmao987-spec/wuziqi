@@ -39,14 +39,29 @@ Page({
           if (res.result.success && res.result.data) {
             const { list, total, currentUser } = res.result.data;
             
+            // 严格判断是否已登录：currentUser 必须存在且不是 notLogin 状态
+            const isLoggedIn = currentUser && 
+                               !currentUser.notLogin && 
+                               currentUser.stats && 
+                               currentUser.stats.openid &&
+                               typeof currentUser.stats.openid === 'string' &&
+                               currentUser.stats.openid.trim() !== '';
+            
             // 获取当前用户openid（用于判断当前用户）
-            const currentUserOpenId = currentUser && currentUser.stats ? 
-              (currentUser.stats.openid || '') : '';
+            // 只有已登录时才获取 openid
+            const currentUserOpenId = isLoggedIn ? (currentUser.stats.openid || '') : '';
             
             // 处理排行榜数据：标记当前用户，确保所有字段都有默认值
             const processedRanks = (list || []).map((item: any) => {
               // 判断是否是当前用户（通过openid比较）
-              const isCurrentUser = item.openid && currentUserOpenId && 
+              // 只有已登录且 openid 都存在且有效时才比较
+              const isCurrentUser = isLoggedIn && 
+                                    item.openid && 
+                                    currentUserOpenId && 
+                                    typeof item.openid === 'string' &&
+                                    typeof currentUserOpenId === 'string' &&
+                                    item.openid.trim() !== '' && 
+                                    currentUserOpenId.trim() !== '' &&
                                     item.openid === currentUserOpenId;
               
               // 计算胜率百分比（云函数返回的是小数，需要转换为百分比）
@@ -66,14 +81,21 @@ Page({
                 streak: item.maxStreak || 0,
                 totalGames: item.totalGames || 0,
                 winRate: winRatePercent, // 转换为百分比（0-100）
-                avatarUrl: item.avatarUrl || '/images/avatar.png',
+                avatarUrl: item.avatarUrl || '/images/icons/avatar.png',
                 isCurrentUser: isCurrentUser
               };
             });
             
+            // 确保未登录时 currentUser 为 null 或 { notLogin: true }
+            let finalCurrentUser = currentUser;
+            if (!currentUser || currentUser.notLogin) {
+              // 未登录，确保返回明确的未登录标识
+              finalCurrentUser = { notLogin: true };
+            }
+            
             this.setData({
               ranks: processedRanks,
-              currentUser: currentUser,
+              currentUser: finalCurrentUser,
               currentUserOpenId: currentUserOpenId,
               total: total || 0,
               loading: false
@@ -106,5 +128,18 @@ Page({
         }
       });
     });
+  },
+
+  // 头像加载失败处理
+  onAvatarError(e: any) {
+    const index = e.currentTarget.dataset.index;
+    if (index !== undefined && this.data.ranks[index]) {
+      // 替换为默认头像
+      const ranks = this.data.ranks;
+      ranks[index].avatarUrl = '/images/icons/avatar.png';
+      this.setData({
+        ranks: ranks
+      });
+    }
   }
 });

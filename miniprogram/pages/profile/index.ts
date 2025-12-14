@@ -6,6 +6,7 @@ Page({
     },
     tempNickName: '',
     tempAvatarUrl: '',
+    tempAvatarFileId: '', // 临时头像 fileID（云存储）
     stats: {
       games: 36,
       wins: 22,
@@ -106,14 +107,83 @@ Page({
     
     console.log('选择的头像URL:', avatarUrl);
     
-    this.setData({
-      tempAvatarUrl: avatarUrl
-    });
+    // 检测是否是临时路径（需要上传到云存储）
+    const isTempPath = this._isTempAvatarPath(avatarUrl);
     
-    // 如果已经有昵称，自动保存
-    if (this.data.tempNickName && this.data.tempNickName.trim()) {
-      this._saveTempUserInfo();
+    if (isTempPath) {
+      // 临时路径，需要上传到云存储
+      wx.showLoading({
+        title: '上传头像中...',
+        mask: true
+      });
+      
+      this._uploadAvatarToCloud(avatarUrl).then((fileID: string) => {
+        wx.hideLoading();
+        console.log('头像上传成功，fileID:', fileID);
+        // 保存 fileID 到临时数据
+        this.setData({
+          tempAvatarUrl: fileID, // 存储 fileID 而不是临时路径
+          tempAvatarFileId: fileID
+        });
+        
+        // 如果已经有昵称，自动保存
+        if (this.data.tempNickName && this.data.tempNickName.trim()) {
+          this._saveTempUserInfo();
+        }
+      }).catch((err: any) => {
+        wx.hideLoading();
+        console.error('头像上传失败:', err);
+        wx.showToast({
+          title: '头像上传失败，请重试',
+          icon: 'none'
+        });
+      });
+    } else {
+      // 已经是 https 链接（微信头像），直接使用
+      this.setData({
+        tempAvatarUrl: avatarUrl,
+        tempAvatarFileId: '' // 不是 fileID
+      });
+      
+      // 如果已经有昵称，自动保存
+      if (this.data.tempNickName && this.data.tempNickName.trim()) {
+        this._saveTempUserInfo();
+      }
     }
+  },
+
+  // 判断是否是临时路径
+  _isTempAvatarPath(avatarUrl: string): boolean {
+    if (!avatarUrl) return false;
+    // 检测临时路径特征
+    return avatarUrl.includes('127.0.0.1') || 
+           avatarUrl.includes('__tmp__') || 
+           avatarUrl.startsWith('wxfile://') ||
+           avatarUrl.startsWith('http://localhost') ||
+           (avatarUrl.startsWith('http://') && !avatarUrl.startsWith('https://'));
+  },
+
+  // 上传头像到云存储
+  _uploadAvatarToCloud(filePath: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      // 生成唯一文件名
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const cloudPath = `avatars/${timestamp}_${randomStr}.jpg`;
+      
+      wx.cloud.uploadFile({
+        cloudPath: cloudPath,
+        filePath: filePath,
+        success: (res) => {
+          console.log('上传成功，fileID:', res.fileID);
+          resolve(res.fileID);
+        },
+        fail: (err) => {
+          console.error('上传失败:', err);
+          reject(err);
+        }
+      });
+    });
   },
 
   // 昵称输入回调
@@ -145,13 +215,19 @@ Page({
 
   // 保存临时用户信息（自动保存）
   _saveTempUserInfo() {
-    const userInfo = {
-      nickName: this.data.tempNickName?.trim() || '微信用户',
-      avatarUrl: this.data.tempAvatarUrl || ''
+    const userInfo: any = {
+      nickName: this.data.tempNickName?.trim() || '微信用户'
     };
     
+    // 如果有 fileID，使用 fileID；否则使用 avatarUrl
+    if (this.data.tempAvatarFileId) {
+      userInfo.avatarFileId = this.data.tempAvatarFileId;
+    } else if (this.data.tempAvatarUrl) {
+      userInfo.avatarUrl = this.data.tempAvatarUrl;
+    }
+    
     // 确保至少有昵称或头像
-    if (!userInfo.nickName && !userInfo.avatarUrl) {
+    if (!userInfo.nickName && !userInfo.avatarFileId && !userInfo.avatarUrl) {
       return;
     }
     
@@ -179,15 +255,28 @@ Page({
 
   // 保存用户信息的内部方法
   _saveUserInfo(userInfo: { nickName?: string; avatarUrl?: string }) {
-    const saveUserInfo = {
-      nickName: (userInfo.nickName || this.data.tempNickName || '微信用户').trim(),
-      avatarUrl: userInfo.avatarUrl || this.data.tempAvatarUrl || ''
+    const saveUserInfo: any = {
+      nickName: (userInfo.nickName || this.data.tempNickName || '微信用户').trim()
     };
     
     // 确保昵称不为空
     if (!saveUserInfo.nickName) {
       saveUserInfo.nickName = '微信用户';
     }
+    
+    // 处理头像：优先使用 fileID，其次使用 avatarUrl（https 链接）
+    if (this.data.tempAvatarFileId) {
+      // 有 fileID，保存 fileID
+      saveUserInfo.avatarFileId = this.data.tempAvatarFileId;
+      saveUserInfo.avatarUrl = ''; // 清空旧的 avatarUrl
+    } else if (userInfo.avatarUrl || this.data.tempAvatarUrl) {
+      const avatarUrl = userInfo.avatarUrl || this.data.tempAvatarUrl || '';
+      // 如果是临时路径，不应该保存
+      if (!this._isTempAvatarPath(avatarUrl)) {
+        saveUserInfo.avatarUrl = avatarUrl;
+      }
+    }
+    
     wx.showLoading({
       title: '登录中...',
       mask: true
@@ -229,11 +318,15 @@ Page({
               console.log('保存用户信息成功:', saveRes);
               wx.hideLoading();
               if (saveRes.result.success) {
-                // 保存到本地存储
-                wx.setStorageSync('userInfo', saveUserInfo);
+                // 保存到本地存储（只保存昵称和最终的头像URL，不保存 fileID）
+                const localUserInfo = {
+                  nickName: saveUserInfo.nickName,
+                  avatarUrl: saveRes.result.data?.avatarUrl || saveUserInfo.avatarUrl || ''
+                };
+                wx.setStorageSync('userInfo', localUserInfo);
                 // 更新页面数据
                 this.setData({
-                  userInfo: saveUserInfo
+                  userInfo: localUserInfo
                 });
                 wx.showToast({
                   title: '保存成功',
@@ -242,7 +335,8 @@ Page({
                 // 清空临时数据
                 this.setData({
                   tempNickName: '',
-                  tempAvatarUrl: ''
+                  tempAvatarUrl: '',
+                  tempAvatarFileId: ''
                 });
                 // 重新加载用户信息
                 this.loadUserInfo();
@@ -347,6 +441,14 @@ Page({
           recent: []
         });
       }
+    });
+  },
+
+  // 头像加载失败处理
+  onAvatarError() {
+    // 替换为默认头像
+    this.setData({
+      'userInfo.avatarUrl': '/images/icons/avatar.png'
     });
   }
 });

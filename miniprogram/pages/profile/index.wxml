@@ -3,9 +3,9 @@
     <view class="user-header">
       <!-- 使用 chooseAvatar 方式获取头像 -->
       <button wx:if="{{!userInfo.nickName}}" class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
-        <image class="avatar" src="{{userInfo.avatarUrl || '/images/avatar.png'}}" mode="aspectFill"></image>
+        <image class="avatar" src="{{userInfo.avatarUrl || '/images/icons/avatar.png'}}" mode="aspectFill" lazy-load="true" binderror="onAvatarError"></image>
       </button>
-      <image wx:else class="avatar" src="{{userInfo.avatarUrl || '/images/avatar.png'}}" mode="aspectFill"></image>
+      <image wx:else class="avatar" src="{{userInfo.avatarUrl || '/images/icons/avatar.png'}}" mode="aspectFill" lazy-load="true" binderror="onAvatarError"></image>
       
       <!-- 昵称输入框 -->
       <input wx:if="{{!userInfo.nickName}}" class="nickname-input" type="nickname" placeholder="请输入昵称" value="{{tempNickName}}" bindinput="onNickNameInput" confirm-type="done"></input>
