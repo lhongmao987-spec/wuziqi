@@ -225,6 +225,7 @@ page {
   width: 600rpx;
   max-width: 90%;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .modal-header {
@@ -254,19 +255,23 @@ page {
 
 .modal-body {
   padding: 32rpx;
+  box-sizing: border-box;
 }
 
 .room-input {
   width: 100%;
+  box-sizing: border-box;
   background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 12rpx;
-  padding: 24rpx;
+  padding: 32rpx 24rpx;
+  min-height: 88rpx;
   color: #f1f5f9;
   font-size: 32rpx;
   text-align: center;
   letter-spacing: 8rpx;
   font-family: 'Courier New', monospace;
+  line-height: 1.5;
 }
 
 .room-input::placeholder {

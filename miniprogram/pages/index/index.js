@@ -86,10 +86,27 @@ Page({
 
   // 创建房间
   async createRoom() {
+    // 检查用户是否已登录
+    const userInfo = wx.getStorageSync('userInfo') || {};
+    if (!userInfo.nickName || userInfo.nickName.trim() === '') {
+      wx.showModal({
+        title: '提示',
+        content: '请先完善个人信息（设置昵称和头像）才能创建房间',
+        showCancel: false,
+        confirmText: '去设置',
+        success: (res) => {
+          if (res.confirm) {
+            wx.navigateTo({
+              url: '/pages/profile/index'
+            });
+          }
+        }
+      });
+      return;
+    }
+
     try {
       wx.showLoading({ title: '创建中...' });
-
-      const userInfo = wx.getStorageSync('userInfo') || {};
       
       const result = await wx.cloud.callFunction({
         name: 'quickstartFunctions',
@@ -163,6 +180,25 @@ Page({
 
   // 加入房间
   async joinRoom() {
+    // 检查用户是否已登录
+    const userInfo = wx.getStorageSync('userInfo') || {};
+    if (!userInfo.nickName || userInfo.nickName.trim() === '') {
+      wx.showModal({
+        title: '提示',
+        content: '请先完善个人信息（设置昵称和头像）才能加入房间',
+        showCancel: false,
+        confirmText: '去设置',
+        success: (res) => {
+          if (res.confirm) {
+            wx.navigateTo({
+              url: '/pages/profile/index'
+            });
+          }
+        }
+      });
+      return;
+    }
+
     const roomId = this.data.roomIdInput.trim();
     
     if (!roomId || roomId.length !== 4) {
@@ -175,8 +211,6 @@ Page({
 
     try {
       wx.showLoading({ title: '加入中...' });
-
-      const userInfo = wx.getStorageSync('userInfo') || {};
 
       const result = await wx.cloud.callFunction({
         name: 'quickstartFunctions',

@@ -22,11 +22,17 @@ Page({
   onLoad() {
     // 页面加载时从数据库获取用户信息
     this.loadUserInfo();
+    // 加载用户战绩和最近对局
+    this.loadUserStats();
+    this.loadRecentGames();
   },
 
   onShow() {
     // 每次显示页面时重新加载用户信息
     this.loadUserInfo();
+    // 重新加载用户战绩和最近对局（可能有更新）
+    this.loadUserStats();
+    this.loadRecentGames();
   },
 
   // 从数据库加载用户信息
@@ -270,6 +276,75 @@ Page({
         wx.showToast({
           title: '登录失败，请重试',
           icon: 'none'
+        });
+      }
+    });
+  },
+
+  // 加载用户战绩
+  loadUserStats() {
+    wx.cloud.callFunction({
+      name: 'quickstartFunctions',
+      data: {
+        type: 'getUserStats'
+      },
+      success: (res: any) => {
+        if (res.result.success && res.result.data) {
+          const stats = res.result.data;
+          this.setData({
+            stats: {
+              games: stats.totalGames || 0,
+              wins: stats.winCount || 0,
+              streak: stats.currentStreak || 0,
+              bestAi: stats.favoriteDifficulty || '中级'
+            }
+          });
+        } else {
+          // 没有战绩数据，使用默认值
+          this.setData({
+            stats: {
+              games: 0,
+              wins: 0,
+              streak: 0,
+              bestAi: '中级'
+            }
+          });
+        }
+      },
+      fail: (err) => {
+        console.error('获取用户战绩失败:', err);
+      }
+    });
+  },
+
+  // 加载最近对局
+  loadRecentGames() {
+    wx.cloud.callFunction({
+      name: 'quickstartFunctions',
+      data: {
+        type: 'getRecentGames',
+        limit: 10
+      },
+      success: (res: any) => {
+        if (res.result.success && res.result.data) {
+          const records = res.result.data.map((record: any) => ({
+            opponent: record.opponentName || (record.opponentType === 'AI' ? 'AI' : record.opponentType === '好友' ? '好友' : '本机'),
+            result: record.result || '负',
+            moves: record.moves || 0
+          }));
+          this.setData({
+            recent: records
+          });
+        } else {
+          this.setData({
+            recent: []
+          });
+        }
+      },
+      fail: (err) => {
+        console.error('获取最近对局失败:', err);
+        this.setData({
+          recent: []
         });
       }
     });

@@ -3,20 +3,44 @@
     <view class="title">排行榜</view>
     <view wx:if="{{loading}}" class="loading">加载中...</view>
     <view wx:else>
-      <view wx:if="{{ranks.length === 0}}" class="empty">暂无排行榜数据</view>
+      <!-- 空状态 -->
+      <view wx:if="{{ranks.length === 0}}" class="empty-container">
+        <view class="empty-icon">📊</view>
+        <view class="empty-text">暂无排行数据，快去对战吧</view>
+      </view>
+      <!-- 排行榜列表 -->
       <view wx:else class="list">
         <block wx:for="{{ranks}}" wx:key="rank">
-          <view class="item">
-            <view class="left">
-              <view class="index">{{item.rank}}</view>
-              <view class="name">{{item.name || '未命名'}}</view>
+          <view class="item {{item.isCurrentUser ? 'current-user' : ''}} {{item.rank <= 3 ? 'top-three' : ''}}">
+            <!-- 左侧排名区 -->
+            <view class="rank-area">
+              <view wx:if="{{item.rank === 1}}" class="medal">🥇</view>
+              <view wx:elif="{{item.rank === 2}}" class="medal">🥈</view>
+              <view wx:elif="{{item.rank === 3}}" class="medal">🥉</view>
+              <view wx:else class="rank-number">{{item.rank}}</view>
             </view>
-            <view class="right">
-              <view class="stat">{{item.wins}} 胜</view>
-              <view class="streak">连胜 {{item.streak}}</view>
+            <!-- 中间用户区 -->
+            <view class="user-area">
+              <image class="avatar" src="{{item.avatarUrl || '/images/avatar.png'}}" mode="aspectFill"></image>
+              <view class="user-info">
+                <view class="name">{{item.name || '未命名'}}</view>
+                <view class="sub-info">胜率{{item.winRate || 0}}% · 共{{item.totalGames || 0}}场</view>
+              </view>
+            </view>
+            <!-- 右侧数据区 -->
+            <view class="data-area">
+              <view class="record">{{item.wins || 0}}胜 {{item.loses || 0}}负</view>
+              <view class="streak">最高连胜 {{item.streak || 0}}</view>
             </view>
           </view>
         </block>
+        <!-- 当前用户排名提示 -->
+        <view wx:if="{{currentUser && !currentUser.notRanked}}" class="rank-footer">
+          <view class="rank-footer-text">你当前排名：第 {{currentUser.rank}} 名</view>
+        </view>
+        <view wx:elif="{{currentUser && currentUser.notRanked && !loading}}" class="rank-footer">
+          <view class="rank-footer-text">未上榜（至少对战 5 场）<text wx:if="{{currentUser.needGames > 0}}">，还差 {{currentUser.needGames}} 场</text></view>
+        </view>
       </view>
     </view>
   </view>

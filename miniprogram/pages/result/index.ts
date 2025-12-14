@@ -41,6 +41,54 @@ Page({
       highlight,
       badges
     });
+    
+    // 上报战绩（只在人机对战模式下上报，且用户已登录）
+    const playerResult = query.playerResult;
+    const mode = query.mode;
+    if (playerResult && mode && mode !== 'PVP_LOCAL') {
+      // 检查用户是否已登录
+      const userInfo = wx.getStorageSync('userInfo');
+      if (userInfo && userInfo.nickName && userInfo.nickName.trim() !== '') {
+        // 用户已登录，上报战绩
+        this.reportGameResult({
+          result: playerResult,
+          moves: moves,
+          mode: mode,
+          opponentType: query.opponentType || 'AI',
+          opponentName: query.opponentName || 'AI',
+          difficulty: query.difficulty || '',
+          duration: Number(query.duration || 0)
+        });
+      } else {
+        // 用户未登录，不保存战绩
+        console.log('用户未登录，不保存战绩');
+      }
+    }
+  },
+
+  // 上报对局结果
+  reportGameResult(gameData: any) {
+    wx.cloud.callFunction({
+      name: 'quickstartFunctions',
+      data: {
+        type: 'reportResult',
+        data: gameData
+      },
+      success: (res: any) => {
+        if (res.result.success) {
+          console.log('战绩上报成功');
+        } else {
+          console.error('战绩上报失败:', res.result.errMsg);
+          // 如果是未登录导致的失败，不显示错误提示（因为这是预期的行为）
+          if (res.result.errMsg && res.result.errMsg.indexOf('未登录') === -1) {
+            // 其他错误可以在这里处理
+          }
+        }
+      },
+      fail: (err) => {
+        console.error('战绩上报失败:', err);
+      }
+    });
   },
 
   restart() {

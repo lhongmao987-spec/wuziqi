@@ -24,6 +24,7 @@ Page({
     enableSound: true,
     winningPositions: [] as Array<{ x: number; y: number }>, // 获胜的五子位置
     isProcessingMove: false, // 标记是否正在处理落子，防止快速连续点击
+    gameStartTime: null as number | null, // 对局开始时间戳
     // 在线对战相关
     gameId: '',
     roomDocId: '',
@@ -131,6 +132,11 @@ Page({
     });
 
     core.init(config);
+    
+    // 记录游戏开始时间
+    this.setData({
+      gameStartTime: Date.now()
+    });
   },
 
   // 初始化在线对战
@@ -200,6 +206,11 @@ Page({
           };
           
           core.init(config);
+          
+          // 记录游戏开始时间
+          this.setData({
+            gameStartTime: Date.now()
+          });
           
           // 保存初始状态到数据库
           const state = core.getState();
@@ -453,7 +464,58 @@ Page({
       wx.removeStorageSync(storageKey);
     }
     wx.setStorageSync('lastConfig', state.config);
-    const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}`;
+    
+    // 计算玩家结果（用于统计上报）
+    let playerResult = '';
+    if (state.config.mode === GameMode.PVE) {
+      // 人机对战：玩家是黑棋，AI是白棋
+      if (state.result === GameResult.BlackWin) {
+        playerResult = '胜';
+      } else if (state.result === GameResult.WhiteWin || state.result === GameResult.BlackLoseForbidden) {
+        playerResult = '负';
+      } else if (state.result === GameResult.Draw) {
+        playerResult = '和';
+      }
+    } else if (state.config.mode === GameMode.PVP_LOCAL) {
+      // 本机对战：不统计
+      playerResult = '';
+    } else if (state.config.mode === GameMode.PVP_ONLINE) {
+      // 在线对战：根据当前玩家的身份判断
+      if (this.data.myPlayer === Player.Black) {
+        if (state.result === GameResult.BlackWin) {
+          playerResult = '胜';
+        } else if (state.result === GameResult.WhiteWin) {
+          playerResult = '负';
+        } else if (state.result === GameResult.Draw) {
+          playerResult = '和';
+        }
+      } else {
+        if (state.result === GameResult.WhiteWin) {
+          playerResult = '胜';
+        } else if (state.result === GameResult.BlackWin) {
+          playerResult = '负';
+        } else if (state.result === GameResult.Draw) {
+          playerResult = '和';
+        }
+      }
+    }
+    
+    // 计算对局时长（秒）
+    const gameStartTime = this.data.gameStartTime || Date.now();
+    const duration = Math.max(0, Math.floor((Date.now() - gameStartTime) / 1000));
+    
+    // 构建跳转参数
+    const params = [
+      `result=${state.result}`,
+      `winner=${state.winner || ''}`,
+      `moves=${state.moves.length}`,
+      `mode=${state.config.mode}`,
+      `playerResult=${playerResult}`,
+      `opponentType=${state.config.mode === GameMode.PVE ? 'AI' : state.config.mode === GameMode.PVP_ONLINE ? '玩家' : ''}`,
+      `opponentName=${state.config.mode === GameMode.PVE ? 'AI' : state.config.mode === GameMode.PVP_ONLINE ? '在线玩家' : ''}`,
+      `difficulty=${state.config.aiLevel || ''}`,
+      `duration=${duration}`
+    ].filter(p => p.split('=')[1] !== '').join('&');
     
     // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时
     setTimeout(() => {

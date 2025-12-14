@@ -18,7 +18,8 @@
 
   <view class="card">
     <view class="title">我的战绩</view>
-    <view class="grid">
+    <view wx:if="{{!userInfo.nickName}}" class="empty-tip">请先完善个人信息以查看战绩</view>
+    <view wx:else class="grid">
       <view class="stat">
         <view class="label">对局数</view>
         <view class="value">{{stats.games}}</view>
@@ -40,7 +41,9 @@
 
   <view class="card">
     <view class="title">最近对局</view>
-    <view class="list">
+    <view wx:if="{{!userInfo.nickName}}" class="empty-tip">请先完善个人信息以查看最近对局</view>
+    <view wx:elif="{{recent.length === 0}}" class="empty-tip">暂无对局记录</view>
+    <view wx:else class="list">
       <block wx:for="{{recent}}" wx:key="opponent">
         <view class="item">
           <view>
