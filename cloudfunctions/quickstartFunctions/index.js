@@ -404,6 +404,9 @@ const reportResult = async (event) => {
     }).get();
     const userInfo = userResult.data.length > 0 ? userResult.data[0] : null;
     
+    // 兼容 mode 和 gameMode 字段
+    const gameMode = gameData.gameMode || gameData.mode || 'PVE';
+    
     // 1. 保存对局记录到 gameRecords（包含 dedupeKey）
     const gameRecord = {
       playerOpenId: openid,
@@ -414,7 +417,7 @@ const reportResult = async (event) => {
       moves: gameData.moves || 0,
       duration: gameData.duration || 0,
       difficulty: gameData.difficulty || '',
-      gameMode: gameData.gameMode || 'PVE',
+      gameMode: gameMode,
       dedupeKey: dedupeKey, // 去重键
       createTime: new Date()
     };
@@ -427,7 +430,7 @@ const reportResult = async (event) => {
         result: result,
         nickName: userInfo ? userInfo.nickName : '',
         avatarUrl: userInfo ? userInfo.avatarUrl : '',
-        gameMode: gameData.gameMode,
+        gameMode: gameMode,
         opponentType: gameData.opponentType
       }
     });

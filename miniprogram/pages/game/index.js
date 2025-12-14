@@ -24,6 +24,7 @@ Page({
     enableSound: true,
     isProcessingMove: false, // 标记是否正在处理落子，防止快速连续点击
     gameStartTime: null, // 对局开始时间戳
+    dedupeKey: '', // 去重键，用于战绩上报幂等性
   },
   
   // 使用同步变量立即阻止重复点击，不依赖异步的setData
@@ -83,9 +84,20 @@ Page({
         this.updateState(state);
         
         // 恢复游戏时也记录开始时间（使用当前时间，因为无法准确知道原始开始时间）
+        const gameStartTime = Date.now();
+        
+        // 恢复游戏时，如果 dedupeKey 不存在，生成一个新的
+        let dedupeKey = wx.getStorageSync('dedupeKey') || '';
+        if (!dedupeKey) {
+          dedupeKey = 'g_' + gameStartTime + '_' + Math.random().toString(16).slice(2);
+          console.log('[FINAL] 恢复游戏时生成 dedupeKey=', dedupeKey);
+        }
+        
         this.setData({
-          gameStartTime: Date.now()
+          gameStartTime: gameStartTime,
+          dedupeKey: dedupeKey
         });
+        wx.setStorageSync('dedupeKey', dedupeKey);
         
         wx.showToast({ title: '已恢复对局', icon: 'success', duration: 1500 });
       } catch (error) {
@@ -133,9 +145,18 @@ Page({
     core.init(config);
     
     // 记录对局开始时间
+    const gameStartTime = Date.now();
+    
+    // 生成全局唯一的 dedupeKey（去重键）
+    const dedupeKey = 'g_' + gameStartTime + '_' + Math.random().toString(16).slice(2);
+    console.log('[FINAL] dedupeKey=', dedupeKey);
+    
+    // 保存到 data 和 storage
     this.setData({
-      gameStartTime: Date.now()
+      gameStartTime: gameStartTime,
+      dedupeKey: dedupeKey
     });
+    wx.setStorageSync('dedupeKey', dedupeKey);
   },
 
   onShow() {
@@ -336,7 +357,20 @@ Page({
       difficulty = levelMap[state.config.aiLevel] || '中级';
     }
     
-    const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}&playerResult=${playerResult}&mode=${state.config.mode}&opponentType=${opponentType}&opponentName=${opponentName}&difficulty=${difficulty}&duration=${duration}`;
+    // 获取 dedupeKey（优先使用 data 中的，如果为空则从 storage 获取，最后生成新的）
+    let dedupeKey = this.data.dedupeKey || '';
+    if (!dedupeKey) {
+      dedupeKey = wx.getStorageSync('dedupeKey') || '';
+    }
+    if (!dedupeKey) {
+      // 兜底：如果仍然为空，立即生成一个新的
+      dedupeKey = 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+      console.warn('[FINAL] 兜底生成 dedupeKey=', dedupeKey);
+      wx.setStorageSync('dedupeKey', dedupeKey);
+    }
+    console.log('[FINAL] dedupeKey=', dedupeKey);
+    
+    const params = `result=${state.result}&winner=${state.winner || ''}&moves=${state.moves.length}&playerResult=${playerResult}&mode=${state.config.mode}&opponentType=${opponentType}&opponentName=${opponentName}&difficulty=${difficulty}&duration=${duration}&dedupeKey=${dedupeKey}`;
     console.log('准备跳转到结果页面，params:', params);
     
     // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时

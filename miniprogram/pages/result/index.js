@@ -45,11 +45,25 @@ Page({
     // 上报战绩（只在人机对战模式下上报，且用户已登录）
     const playerResult = query.playerResult;
     const mode = query.mode;
-    if (playerResult && mode && mode !== 'PVP_LOCAL') {
+    
+    // 按优先级获取 dedupeKey：1. query参数 2. storage 3. 生成新的（兜底）
+    let dedupeKey = query.dedupeKey || '';
+    if (!dedupeKey) {
+      dedupeKey = wx.getStorageSync('dedupeKey') || '';
+    }
+    if (!dedupeKey) {
+      // 如果仍然为空，立即生成一个新的并写入 storage（兜底）
+      dedupeKey = 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+      console.warn('[FINAL] result页面兜底生成 dedupeKey=', dedupeKey);
+      wx.setStorageSync('dedupeKey', dedupeKey);
+    }
+    console.log('[FINAL] dedupeKey=', dedupeKey);
+    
+    if (playerResult && mode && mode !== 'PVP_LOCAL' && dedupeKey) {
       // 检查用户是否已登录
       const userInfo = wx.getStorageSync('userInfo');
       if (userInfo && userInfo.nickName && userInfo.nickName.trim() !== '') {
-        // 用户已登录，上报战绩
+        // 用户已登录，上报战绩（必须传递 dedupeKey）
         this.reportGameResult({
           result: playerResult,
           moves: moves,
@@ -57,17 +71,34 @@ Page({
           opponentType: query.opponentType || 'AI',
           opponentName: query.opponentName || 'AI',
           difficulty: query.difficulty || '',
-          duration: Number(query.duration || 0)
+          duration: Number(query.duration || 0),
+          dedupeKey: dedupeKey // 必须传递 dedupeKey
         });
       } else {
         // 用户未登录，不保存战绩
         console.log('用户未登录，不保存战绩');
       }
+    } else if (playerResult && mode && mode !== 'PVP_LOCAL' && !dedupeKey) {
+      console.error('[FINAL] 错误：dedupeKey 为空，无法上报战绩');
     }
   },
 
   // 上报对局结果
   reportGameResult(gameData) {
+    // 确保 dedupeKey 存在
+    if (!gameData.dedupeKey) {
+      console.error('[FINAL] 错误：reportGameResult 时 dedupeKey 为空');
+      // 尝试从 storage 获取
+      gameData.dedupeKey = wx.getStorageSync('dedupeKey') || '';
+      if (!gameData.dedupeKey) {
+        // 如果仍然为空，生成新的
+        gameData.dedupeKey = 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+        console.warn('[FINAL] reportGameResult 兜底生成 dedupeKey=', gameData.dedupeKey);
+        wx.setStorageSync('dedupeKey', gameData.dedupeKey);
+      }
+    }
+    console.log('[FINAL] 上报 dedupeKey=', gameData.dedupeKey);
+    
     wx.cloud.callFunction({
       name: 'quickstartFunctions',
       data: {
@@ -76,7 +107,7 @@ Page({
       },
       success: (res) => {
         if (res.result.success) {
-          console.log('战绩上报成功');
+          console.log('战绩上报成功', res.result.data && res.result.data.alreadyReported ? '（已上报过）' : '');
         } else {
           console.error('战绩上报失败:', res.result.errMsg);
           // 如果是未登录导致的失败，不显示错误提示（因为这是预期的行为）

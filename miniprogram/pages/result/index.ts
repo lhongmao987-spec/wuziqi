@@ -46,7 +46,12 @@ Page({
     // 上报战绩（只在人机对战模式下上报，且用户已登录）
     const playerResult = query.playerResult;
     const mode = query.mode;
-    const dedupeKey = query.dedupeKey;
+    // 优先从 query 获取 dedupeKey，如果缺失则从 storage 获取
+    let dedupeKey = query.dedupeKey;
+    if (!dedupeKey) {
+      dedupeKey = wx.getStorageSync('currentDedupeKey') || '';
+      console.log('从 storage 获取 dedupeKey:', dedupeKey);
+    }
     
     // 第一道保险：检查是否已上报过
     if (this.data.hasReported) {

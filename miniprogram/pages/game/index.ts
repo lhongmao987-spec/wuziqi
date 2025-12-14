@@ -144,6 +144,9 @@ Page({
       gameStartTime: gameStartTime,
       clientGameId: clientGameId
     });
+    
+    // 保存 clientGameId 到 storage（作为 dedupeKey 的备份）
+    wx.setStorageSync('currentDedupeKey', clientGameId);
   },
 
   // 初始化在线对战
@@ -214,11 +217,21 @@ Page({
           
           core.init(config);
           
-          // 记录游戏开始时间并生成clientGameId（在线对战使用gameId作为dedupeKey）
+          // 记录游戏开始时间并生成clientGameId（在线对战优先使用gameId，兼容无roomId模式）
           const gameStartTime = Date.now();
+          // 在线对战：优先使用 gameId，如果没有 roomId 则使用 gameId+endedAt
+          // 但为了兼容性，也生成一个 clientGameId 作为备份
+          const openid = wx.getStorageSync('openid') || 'anonymous';
+          const random = Math.floor(Math.random() * 10000);
+          const clientGameId = `${openid}_${gameStartTime}_${random}`;
+          
           this.setData({
-            gameStartTime: gameStartTime
+            gameStartTime: gameStartTime,
+            clientGameId: clientGameId // 保存作为备份
           });
+          
+          // 保存 clientGameId 到 storage（作为 dedupeKey 的备份）
+          wx.setStorageSync('currentDedupeKey', clientGameId);
           
           // 保存初始状态到数据库
           const state = core.getState();
@@ -515,13 +528,35 @@ Page({
     // 生成dedupeKey（去重键）
     let dedupeKey = '';
     if (state.config.mode === GameMode.PVP_ONLINE) {
-      // 在线对战：使用gameId或roomId + endedAt
+      // 在线对战：优先使用gameId，如果没有则使用roomId + endedAt，最后使用clientGameId
       const endedAt = Math.floor(Date.now() / 1000); // 秒级时间戳
-      dedupeKey = this.data.gameId || `${this.data.roomDocId}_${endedAt}`;
+      if (this.data.gameId) {
+        dedupeKey = this.data.gameId;
+      } else if (this.data.roomDocId) {
+        dedupeKey = `${this.data.roomDocId}_${endedAt}`;
+      } else {
+        // 兼容没有 roomId 的模式：使用 clientGameId
+        dedupeKey = this.data.clientGameId || '';
+      }
     } else {
       // 人机/本地：使用clientGameId
       dedupeKey = this.data.clientGameId || '';
     }
+    
+    // 如果 dedupeKey 仍然为空，从 storage 获取或生成新的
+    if (!dedupeKey) {
+      dedupeKey = wx.getStorageSync('currentDedupeKey') || '';
+      if (!dedupeKey) {
+        // 如果 storage 也没有，生成一个新的
+        const openid = wx.getStorageSync('openid') || 'anonymous';
+        const gameStartTime = this.data.gameStartTime || Date.now();
+        const random = Math.floor(Math.random() * 10000);
+        dedupeKey = `${openid}_${gameStartTime}_${random}`;
+      }
+    }
+    
+    // 保存 dedupeKey 到 storage（确保 result 页面可以获取）
+    wx.setStorageSync('currentDedupeKey', dedupeKey);
     
     // 构建跳转参数
     const params = [
