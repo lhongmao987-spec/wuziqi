@@ -127,37 +127,55 @@ Page({
       console.warn('roomDocId为空，无法监听房间');
       return;
     }
-
+  
     try {
       const db = wx.cloud.database();
+  
       const watcher = db.collection('rooms').doc(roomDocId).watch({
-        onChange: (snapshot) => {
-          if (snapshot.type === 'update' && snapshot.doc) {
-            const room = snapshot.doc;
-            this.updateRoomData(room);
-          } else if (snapshot.type === 'remove') {
-            wx.showToast({
-              title: '房间已解散',
-              icon: 'none'
-            });
-            setTimeout(() => {
-              wx.navigateBack();
-            }, 1500);
+        onChange: async (snapshot) => {
+          console.log(
+            '[room.watch] type=',
+            snapshot.type,
+            'docsLen=',
+            snapshot.docs?.length,
+            'changes=',
+            snapshot.docChanges
+          );
+  
+          // ✅ 1) 优先使用 snapshot.docs[0]（大多数情况下最新数据在这里）
+          const roomFromDocs = snapshot.docs && snapshot.docs[0];
+          if (roomFromDocs) {
+            this.updateRoomData(roomFromDocs);
+            return;
+          }
+  
+          // ✅ 2) 兜底：如果没有 docs，就主动 get 一次最新 room
+          try {
+            const latest = await db.collection('rooms').doc(roomDocId).get();
+            if (latest && latest.data) {
+              this.updateRoomData(latest.data);
+            }
+          } catch (e) {
+            console.error('[room.watch] fallback get failed:', e);
+          }
+  
+          // ✅ 3) 删除事件（兼容 remove）
+          if (snapshot.type === 'remove') {
+            wx.showToast({ title: '房间已解散', icon: 'none' });
+            setTimeout(() => wx.navigateBack(), 1500);
           }
         },
         onError: (error) => {
           console.error('监听房间失败:', error);
         }
       });
-
-      this.setData({
-        roomWatcher: watcher
-      });
+  
+      this.setData({ roomWatcher: watcher });
     } catch (error) {
       console.error('启动房间监听失败:', error);
     }
   },
-
+  
   // 开始游戏
   async startGame() {
     if (!this.data.isCreator || this.data.roomStatus !== 'ready') {

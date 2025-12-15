@@ -9,6 +9,7 @@ const _ = db.command;
 // 引入服务模块
 const statsService = require('./services/statsService');
 const leaderboardService = require('./services/leaderboardService');
+const fixPlayer2Null = require('./fixPlayer2Null');
 // 获取openid
 const getOpenId = async () => {
   // 获取基础信息
@@ -507,7 +508,11 @@ const createRoom = async (event) => {
         nickName: nickName,
         avatarUrl: avatarUrl
       },
-      player2: null,
+      player2: {
+        openid: '',
+        nickName: '',
+        avatarUrl: ''
+      },
       status: 'waiting', // waiting / ready / playing / ended
       gameId: null,
       createdAt: now,
@@ -536,116 +541,123 @@ const createRoom = async (event) => {
 
 // 加入房间
 const joinRoom = async (event) => {
+  const wxContext = cloud.getWXContext();
+  const openid = wxContext.OPENID;
+  const roomId = event.roomId;
+  const userInfo = event.data || {};
+  
+  if (!roomId) {
+    return {
+      success: false,
+      errMsg: '房间号不能为空'
+    };
+  }
+  
+  // 先拿用户信息（可以在事务外，因为不影响并发一致性）
+  const userResult = await db.collection('users').where({
+    _openid: openid
+  }).get();
+  
+  const dbUserInfo = userResult.data.length > 0 ? userResult.data[0] : null;
+  const nickName = userInfo.nickName || (dbUserInfo ? dbUserInfo.nickName : '');
+  const avatarUrl = userInfo.avatarUrl || (dbUserInfo ? dbUserInfo.avatarUrl : '');
+  
+  if (!nickName || nickName.trim() === '') {
+    return {
+      success: false,
+      errMsg: '请先完善个人信息（设置昵称和头像）才能加入房间'
+    };
+  }
+  
   try {
-    const wxContext = cloud.getWXContext();
-    const openid = wxContext.OPENID;
-    const roomId = event.roomId;
-    const userInfo = event.data || {};
-    
-    if (!roomId) {
-      return {
-        success: false,
-        errMsg: '房间号不能为空'
-      };
-    }
-    
-    // 获取用户信息并检查是否已登录
-    const userResult = await db.collection('users').where({
-      _openid: openid
-    }).get();
-    
-    const dbUserInfo = userResult.data.length > 0 ? userResult.data[0] : null;
-    const nickName = userInfo.nickName || (dbUserInfo ? dbUserInfo.nickName : '');
-    const avatarUrl = userInfo.avatarUrl || (dbUserInfo ? dbUserInfo.avatarUrl : '');
-    
-    // 检查用户是否已登录（必须有昵称）
-    if (!nickName || nickName.trim() === '') {
-      return {
-        success: false,
-        errMsg: '请先完善个人信息（设置昵称和头像）才能加入房间'
-      };
-    }
-    
-    // 查询房间
-    const roomResult = await db.collection('rooms').where({
-      roomId: roomId
-    }).get();
-    
-    if (roomResult.data.length === 0) {
-      return {
-        success: false,
-        errMsg: '房间不存在'
-      };
-    }
-    
-    const room = roomResult.data[0];
-    
-    // 检查房间状态
-    if (room.status === 'playing' || room.status === 'ended') {
-      return {
-        success: false,
-        errMsg: '房间已开始或已结束'
-      };
-    }
-    
-    // 检查是否已过期
-    if (room.expireAt && new Date(room.expireAt) < new Date()) {
-      return {
-        success: false,
-        errMsg: '房间已过期'
-      };
-    }
-    
-    // 检查是否是创建者
-    if (room.creator.openid === openid) {
+    const res = await db.runTransaction(async (transaction) => {
+      const roomsCol = transaction.collection('rooms');
+      
+      // 在事务内查询房间（使用 roomId）
+      const roomRes = await roomsCol.where({ roomId: roomId }).get();
+      if (!roomRes.data || roomRes.data.length === 0) {
+        return {
+          success: false,
+          errMsg: '房间不存在'
+        };
+      }
+      
+      const room = roomRes.data[0];
+      
+      // 过期检查：expireAt 若存的是 Date，直接比较；若是时间戳也可兼容
+      const expireAt = room.expireAt;
+      const expireTime =
+        expireAt instanceof Date ? expireAt.getTime() :
+        typeof expireAt === 'number' ? expireAt :
+        expireAt ? new Date(expireAt).getTime() : null;
+      
+      if (expireTime && Date.now() > expireTime) {
+        return {
+          success: false,
+          errMsg: '房间已过期'
+        };
+      }
+      
+      if (room.status === 'playing' || room.status === 'ended') {
+        return {
+          success: false,
+          errMsg: '房间已开始或已结束'
+        };
+      }
+      
+      // 创建者自己点加入：直接返回
+      if (room.creator && room.creator.openid === openid) {
+        return {
+          success: true,
+          data: room,
+          isCreator: true
+        };
+      }
+      
+      // 已经是 player2：直接返回
+      if (room.player2 && room.player2.openid && room.player2.openid === openid) {
+        return {
+          success: true,
+          data: room,
+          isCreator: false
+        };
+      }
+      
+      // 满员判断：player2 只要存在非空 openid 就视为已占用
+      if (room.player2 && room.player2.openid && room.player2.openid.trim() !== '') {
+        return {
+          success: false,
+          errMsg: '房间已满'
+        };
+      }
+      
+      // 更新：一次性写入整个 player2 对象
+      await roomsCol.doc(room._id).update({
+        data: {
+          player2: {
+            openid: openid,
+            nickName: nickName,
+            avatarUrl: avatarUrl
+          },
+          status: 'ready',
+          updatedAt: db.serverDate()
+        }
+      });
+      
+      // 事务内再读一次返回最新房间
+      const updated = await roomsCol.doc(room._id).get();
       return {
         success: true,
-        data: room,
-        isCreator: true
-      };
-    }
-    
-    // 检查是否已有玩家2
-    if (room.player2 && room.player2.openid === openid) {
-      return {
-        success: true,
-        data: room,
+        data: updated.data,
         isCreator: false
       };
-    }
-    
-    if (room.player2) {
-      return {
-        success: false,
-        errMsg: '房间已满'
-      };
-    }
-    
-    // 加入房间
-    const updateResult = await db.collection('rooms').doc(room._id).update({
-      data: {
-        player2: {
-          openid: openid,
-          nickName: nickName,
-          avatarUrl: avatarUrl
-        },
-        status: 'ready', // 双方就绪
-        updatedAt: new Date()
-      }
     });
     
-    // 获取更新后的房间信息
-    const updatedRoom = await db.collection('rooms').doc(room._id).get();
-    
-    return {
-      success: true,
-      data: updatedRoom.data,
-      isCreator: false
-    };
+    return res;
   } catch (e) {
     return {
       success: false,
-      errMsg: e.message || e
+      errMsg: e.message || String(e)
     };
   }
 };
@@ -729,7 +741,7 @@ const updateRoomStatus = async (event) => {
     }
     
     const room = roomResult.data;
-    if (room.creator.openid !== openid && (!room.player2 || room.player2.openid !== openid)) {
+    if (room.creator.openid !== openid && (!room.player2 || !room.player2.openid || room.player2.openid.trim() === '' || room.player2.openid !== openid)) {
       return {
         success: false,
         errMsg: '无权限操作'
@@ -828,7 +840,11 @@ const leaveRoom = async (event) => {
     if (room.player2 && room.player2.openid === openid) {
       await db.collection('rooms').doc(roomDocId).update({
         data: {
-          player2: null,
+          player2: {
+            openid: '',
+            nickName: '',
+            avatarUrl: ''
+          },
           status: 'waiting',
           updatedAt: new Date()
         }
@@ -1017,6 +1033,8 @@ exports.main = async (event, context) => {
       return await updateGameState(event);
     case "getGameState":
       return await getGameState(event);
+    case "fixPlayer2Null":
+      return await fixPlayer2Null();
     default:
       return {
         success: false,
