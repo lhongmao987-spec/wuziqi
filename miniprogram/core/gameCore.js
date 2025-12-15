@@ -261,6 +261,14 @@ class GameCore {
         return;
       }
       
+      // 如果已经到0，保持为0并等待外部（例如在线对战超时换手）处理
+      if (this.state.timeState.currentMoveRemain <= 0) {
+        this.state.timeState.currentMoveRemain = 0;
+        this.state.timeState.currentStartTs = now;
+        this.triggerBoardUpdate();
+        return;
+      }
+
       this.state.timeState.currentMoveRemain -= elapsed;
       if (this.state.timeState.currentMoveRemain <= 0) {
         this.state.timeState.currentMoveRemain = 0;
@@ -271,6 +279,11 @@ class GameCore {
           this.state.timeState.currentStartTs = now;
           this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
           this.triggerBoardUpdate();
+          return;
+        } else if (this.state.config.mode === GameMode.PVP_ONLINE) {
+          // 在线对战不在本地判负或自动切换，交给云函数处理
+          this.triggerBoardUpdate();
+          this.state.timeState.currentStartTs = now;
           return;
         } else {
           // 其他模式下，超时判负

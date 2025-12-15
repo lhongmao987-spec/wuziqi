@@ -9,14 +9,14 @@
     <view class="player">
       <view class="player-meta">
         <view class="player-name">你</view>
-        <view class="player-role">黑棋</view>
+        <view class="player-role">{{myColor === players.White ? '白棋' : '黑棋'}}</view>
       </view>
       <view class="current-turn" wx:if="{{currentPlayer === players.Black}}">轮到你</view>
     </view>
     <view class="player">
       <view class="player-meta" style="align-items: flex-end;">
         <view class="player-name">{{opponentLabel}}</view>
-        <view class="player-role">白棋</view>
+        <view class="player-role">{{myColor === players.White ? '黑棋' : '白棋'}}</view>
       </view>
       <view class="current-turn" wx:if="{{currentPlayer === players.White}}">对手思考中</view>
     </view>
@@ -32,6 +32,29 @@
       enable-highlight="{{enableHighlight}}"
       bind:celltap="handleCellTap"
     />
+  </view>
+
+  <view wx:if="{{showRollOverlay}}" class="roll-overlay">
+    <view class="roll-panel">
+      <view class="roll-title">掷骰子决定先手</view>
+      <view class="roll-desc">{{rollDisplay}}</view>
+      <view class="roll-dice-row">
+        <view class="dice-box">
+          <view class="dice-label">你</view>
+          <view class="dice-value {{rollAnimating ? 'dice-anim' : ''}}">{{rollMe || '-'}}</view>
+        </view>
+        <view class="dice-box">
+          <view class="dice-label">对手</view>
+          <view class="dice-value">{{rollOpp || '-'}}</view>
+        </view>
+      </view>
+      <button
+        class="action-btn primary"
+        bindtap="onTapRollDice"
+        loading="{{rollAnimating}}"
+        disabled="{{rollAnimating || rolledMe}}"
+      >{{rolledMe ? '等待对手' : '点击掷骰'}}</button>
+    </view>
   </view>
 
   <view class="bottom-actions">

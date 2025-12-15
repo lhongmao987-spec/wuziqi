@@ -68,7 +68,7 @@ Page({
 
       if (result.result.success) {
         const room = result.result.data;
-        this.updateRoomData(room);
+        await this.updateRoomData(room);
         // 加载完房间信息后再开始监听
         this.watchRoom();
       } else {
@@ -90,7 +90,7 @@ Page({
   },
 
   // 更新房间数据
-  updateRoomData(room) {
+  async updateRoomData(room) {
     const isCreator = this.data.isCreator || room.creator.openid === '';
     
     let statusText = '等待玩家加入...';
@@ -102,13 +102,45 @@ Page({
       statusText = '游戏已结束';
     }
 
+    const fileIds = [];
+    if (room.creator && room.creator.avatarFileId) {
+      fileIds.push(room.creator.avatarFileId);
+    }
+    if (room.player2 && room.player2.avatarFileId) {
+      fileIds.push(room.player2.avatarFileId);
+    }
+    let fileIdUrlMap = {};
+    if (fileIds.length) {
+      try {
+        const res = await wx.cloud.getTempFileURL({
+          fileList: fileIds
+        });
+        if (res && res.fileList) {
+          res.fileList.forEach(item => {
+            if (item.fileID && item.tempFileURL) {
+              fileIdUrlMap[item.fileID] = item.tempFileURL;
+            }
+          });
+        }
+      } catch (err) {
+        console.error('房间头像 fileId 转 URL 失败', err);
+      }
+    }
+
+    const creatorAvatarUrl = room.creator && room.creator.avatarFileId
+      ? (fileIdUrlMap[room.creator.avatarFileId] || '')
+      : (room.creator && room.creator.avatarUrl) || '';
+    const player2AvatarUrl = room.player2 && room.player2.avatarFileId
+      ? (fileIdUrlMap[room.player2.avatarFileId] || '')
+      : (room.player2 && room.player2.avatarUrl) || '';
+
     this.setData({
       roomId: room.roomId || this.data.roomId, // 确保房间号有值
       roomDocId: room._id || this.data.roomDocId,
       isCreator: isCreator,
       roomStatus: room.status,
-      creatorInfo: room.creator || this.data.creatorInfo,
-      player2Info: room.player2,
+      creatorInfo: Object.assign({}, room.creator, { avatarUrl: creatorAvatarUrl }),
+      player2Info: room.player2 ? Object.assign({}, room.player2, { avatarUrl: player2AvatarUrl }) : room.player2,
       statusText: statusText
     });
 
@@ -145,7 +177,7 @@ Page({
           // ✅ 1) 优先使用 snapshot.docs[0]（大多数情况下最新数据在这里）
           const roomFromDocs = snapshot.docs && snapshot.docs[0];
           if (roomFromDocs) {
-            this.updateRoomData(roomFromDocs);
+            await this.updateRoomData(roomFromDocs);
             return;
           }
   
@@ -153,7 +185,7 @@ Page({
           try {
             const latest = await db.collection('rooms').doc(roomDocId).get();
             if (latest && latest.data) {
-              this.updateRoomData(latest.data);
+              await this.updateRoomData(latest.data);
             }
           } catch (e) {
             console.error('[room.watch] fallback get failed:', e);

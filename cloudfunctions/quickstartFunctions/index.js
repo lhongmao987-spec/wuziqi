@@ -464,7 +464,8 @@ const createRoom = async (event) => {
     
     const dbUserInfo = userResult.data.length > 0 ? userResult.data[0] : null;
     const nickName = userInfo.nickName || (dbUserInfo ? dbUserInfo.nickName : '');
-    const avatarUrl = userInfo.avatarUrl || (dbUserInfo ? dbUserInfo.avatarUrl : '');
+    const avatarFileId = userInfo.avatarFileId || (dbUserInfo ? dbUserInfo.avatarFileId : '');
+    const avatarUrl = ''; // 房间仅存 fileId，避免403
     
     // 检查用户是否已登录（必须有昵称）
     if (!nickName || nickName.trim() === '') {
@@ -506,12 +507,14 @@ const createRoom = async (event) => {
       creator: {
         openid: openid,
         nickName: nickName,
-        avatarUrl: avatarUrl
+        avatarUrl: avatarUrl,
+        avatarFileId: avatarFileId || ''
       },
       player2: {
         openid: '',
         nickName: '',
-        avatarUrl: ''
+        avatarUrl: '',
+        avatarFileId: ''
       },
       status: 'waiting', // waiting / ready / playing / ended
       gameId: null,
@@ -560,7 +563,8 @@ const joinRoom = async (event) => {
   
   const dbUserInfo = userResult.data.length > 0 ? userResult.data[0] : null;
   const nickName = userInfo.nickName || (dbUserInfo ? dbUserInfo.nickName : '');
-  const avatarUrl = userInfo.avatarUrl || (dbUserInfo ? dbUserInfo.avatarUrl : '');
+  const avatarFileId = userInfo.avatarFileId || (dbUserInfo ? dbUserInfo.avatarFileId : '');
+  const avatarUrl = ''; // 房间仅存 fileId，避免403
   
   if (!nickName || nickName.trim() === '') {
     return {
@@ -637,7 +641,8 @@ const joinRoom = async (event) => {
           player2: {
             openid: openid,
             nickName: nickName,
-            avatarUrl: avatarUrl
+          avatarUrl: avatarUrl,
+            avatarFileId: avatarFileId || ''
           },
           status: 'ready',
           updatedAt: db.serverDate()
@@ -758,17 +763,20 @@ const updateRoomStatus = async (event) => {
     
     // 如果状态为playing，创建游戏记录
     if (status === 'playing') {
+      const now = db.serverDate();
+      const initialGameState = {};
       const gameData = {
         roomId: room.roomId,
         roomDocId: roomDocId,
         player1: room.creator,
         player2: room.player2,
-        gameState: null, // 游戏状态将在游戏页面初始化
+        gameState: initialGameState,
         moves: [],
         result: 'ONGOING',
         winner: null,
         startedAt: new Date(),
-        endedAt: null
+        endedAt: null,
+        updatedAt: now
       };
       
       const gameResult = await db.collection('games').add({
@@ -900,31 +908,31 @@ const updateGameState = async (event) => {
       };
     }
     
-    // 更新游戏状态
+    // 更新游戏状态（整对象覆盖，不写子字段）
     const updateData = {
       gameState: gameState,
-      updatedAt: new Date()
+      updatedAt: db.serverDate()
     };
     
-    // 如果有新的棋步，添加到moves数组
+    // 如果有新的棋步，追加（原子 push）
     if (move) {
-      const moves = game.moves || [];
-      moves.push(move);
-      updateData.moves = moves;
+      updateData.moves = _.push(move);
     }
     
-    // 如果游戏结束，更新结果
-    if (gameState.result !== 'ONGOING') {
+    // 如果游戏结束，更新结果并写战绩（幂等）
+    let finished = false;
+    if (gameState.result && gameState.result !== 'ONGOING') {
+      finished = true;
       updateData.result = gameState.result;
       updateData.winner = gameState.winner || null;
-      updateData.endedAt = new Date();
+      updateData.endedAt = db.serverDate();
       
       // 同时更新房间状态为ended
       if (game.roomDocId) {
         await db.collection('rooms').doc(game.roomDocId).update({
           data: {
             status: 'ended',
-            updatedAt: new Date()
+            updatedAt: db.serverDate()
           }
         });
       }
@@ -933,6 +941,11 @@ const updateGameState = async (event) => {
     await db.collection('games').doc(gameId).update({
       data: updateData
     });
+    
+    // 终局入库（幂等）
+    if (finished) {
+      await finalizeOnlineGame(game, gameState, gameId);
+    }
     
     return {
       success: true,
@@ -943,6 +956,179 @@ const updateGameState = async (event) => {
       success: false,
       errMsg: e.message || e
     };
+  }
+};
+
+// 掷骰子决定先手
+const rollDice = async (event) => {
+  const wxContext = cloud.getWXContext();
+  const openid = wxContext.OPENID;
+  const gameId = event.gameId;
+  if (!gameId) {
+    return { success: false, errMsg: 'gameId 不能为空' };
+  }
+  try {
+    const res = await db.runTransaction(async (transaction) => {
+      const gameRef = transaction.collection('games').doc(gameId);
+      const gameDoc = await gameRef.get();
+      const game = gameDoc.data;
+      if (!game) {
+        return { success: false, errMsg: '游戏不存在' };
+      }
+      if (!game.player1 || !game.player2) {
+        return { success: false, errMsg: '玩家未就绪' };
+      }
+      if (game.player1.openid !== openid && game.player2.openid !== openid) {
+        return { success: false, errMsg: '无权限' };
+      }
+
+      const rollObj = game.roll && typeof game.roll === 'object' ? game.roll : {};
+      if (rollObj[openid] && rollObj[openid].value) {
+        return { success: true, data: { roll: rollObj } };
+      }
+
+      const myRoll = Math.floor(1 + Math.random() * 6);
+      rollObj[openid] = {
+        value: myRoll,
+        at: db.serverDate()
+      };
+
+      const opponentOpenid = game.player1.openid === openid ? game.player2.openid : game.player1.openid;
+      const oppRoll = opponentOpenid ? rollObj[opponentOpenid] : null;
+
+      let updateData = {
+        roll: rollObj,
+        updatedAt: db.serverDate()
+      };
+
+      if (oppRoll && typeof oppRoll.value === 'number') {
+        if (myRoll === oppRoll.value) {
+          // 相同点数，清空等待重新掷
+          updateData.roll = {};
+        } else {
+          const firstPlayerOpenid = myRoll > oppRoll.value ? openid : opponentOpenid;
+          const secondOpenid = myRoll > oppRoll.value ? opponentOpenid : openid;
+          updateData.roll = {
+            [openid]: rollObj[openid],
+            [opponentOpenid]: oppRoll,
+            firstPlayerOpenid,
+            blackOpenid: firstPlayerOpenid,
+            whiteOpenid: secondOpenid
+          };
+          if (game.gameState && game.gameState.config && game.gameState.config.mode === 'PVP_ONLINE') {
+            game.gameState.currentPlayer = 'BLACK';
+            if (game.gameState.timeState) {
+              const limit = game.gameState.config.timeLimitPerMove || 60;
+              game.gameState.timeState.currentMoveRemain = limit;
+              game.gameState.timeState.currentStartTs = Date.now();
+            }
+            updateData.gameState = game.gameState;
+          }
+        }
+      }
+
+      await gameRef.update({
+        data: updateData
+      });
+      return { success: true, data: { roll: updateData.roll } };
+    });
+    return res;
+  } catch (e) {
+    return { success: false, errMsg: e.message || e };
+  }
+};
+
+// 强制超时换手
+const forceSwitchTurn = async (event) => {
+  const gameId = event.gameId;
+  if (!gameId) {
+    return { success: false, errMsg: 'gameId 不能为空' };
+  }
+  try {
+    const res = await db.runTransaction(async (transaction) => {
+      const gameRef = transaction.collection('games').doc(gameId);
+      const gameDoc = await gameRef.get();
+      const game = gameDoc.data;
+      if (!game || !game.gameState) {
+        return { success: false, errMsg: '游戏不存在' };
+      }
+      const state = game.gameState;
+      if (!state.timeState) {
+        state.timeState = {};
+      }
+      const nextPlayer = state.currentPlayer === 'BLACK' ? 'WHITE' : 'BLACK';
+      const limit = (state.config && state.config.timeLimitPerMove) ? state.config.timeLimitPerMove : 60;
+      state.currentPlayer = nextPlayer;
+      state.timeState.currentMoveRemain = limit;
+      state.timeState.currentStartTs = Date.now();
+      await gameRef.update({
+        data: {
+          gameState: state,
+          updatedAt: db.serverDate()
+        }
+      });
+      return { success: true, data: { gameState: state } };
+    });
+    return res;
+  } catch (e) {
+    return { success: false, errMsg: e.message || e };
+  }
+};
+
+// 终局战绩（幂等）
+const finalizeOnlineGame = async (game, gameState, gameId) => {
+  if (!game || !game.player1 || !game.player2) return;
+  const result = gameState.result;
+  const winner = gameState.winner; // BLACK / WHITE / NONE
+  const players = [
+    { openid: game.player1.openid, nickName: game.player1.nickName || '', avatarUrl: game.player1.avatarUrl || '' },
+    { openid: game.player2.openid, nickName: game.player2.nickName || '', avatarUrl: game.player2.avatarUrl || '' },
+  ];
+  for (const p of players) {
+    if (!p.openid) continue;
+    const dedupeKey = `online_${gameId}_${p.openid}`;
+    const exist = await db.collection('gameRecords').where({
+      playerOpenId: p.openid,
+      dedupeKey
+    }).get();
+    if (exist.data && exist.data.length > 0) {
+      continue;
+    }
+    let outcome = 'draw';
+    if (winner === 'BLACK') {
+      outcome = p.openid === game.player1.openid ? 'win' : 'lose';
+      if (game.roll && game.roll.blackOpenid) {
+        outcome = p.openid === game.roll.blackOpenid ? 'win' : 'lose';
+      }
+    } else if (winner === 'WHITE') {
+      outcome = p.openid === game.player1.openid ? 'lose' : 'win';
+      if (game.roll && game.roll.whiteOpenid) {
+        outcome = p.openid === game.roll.whiteOpenid ? 'win' : 'lose';
+      }
+    }
+    const opponent = p.openid === game.player1.openid ? game.player2 : game.player1;
+    const gameRecord = {
+      playerOpenId: p.openid,
+      opponentOpenId: opponent.openid,
+      opponentName: opponent.nickName || '',
+      result: outcome === 'win' ? '胜' : outcome === 'lose' ? '负' : '和',
+      moves: (gameState.moves || []).length,
+      duration: gameState.duration || 0,
+      gameMode: 'PVP_ONLINE',
+      opponentType: 'ONLINE',
+      dedupeKey,
+      createTime: new Date()
+    };
+    await db.collection('gameRecords').add({ data: gameRecord });
+    await updateUserStatsAfterGame({
+      data: {
+        result: outcome,
+        nickName: p.nickName,
+        avatarUrl: p.avatarUrl,
+        gameMode: 'PVP_ONLINE',
+        opponentType: 'ONLINE'
+      }
+    });
   }
 };
 
@@ -1033,6 +1219,10 @@ exports.main = async (event, context) => {
       return await updateGameState(event);
     case "getGameState":
       return await getGameState(event);
+    case "rollDice":
+      return await rollDice(event);
+    case "forceSwitchTurn":
+      return await forceSwitchTurn(event);
     case "fixPlayer2Null":
       return await fixPlayer2Null();
     default:
