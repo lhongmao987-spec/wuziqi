@@ -17,7 +17,10 @@ Page({
     moves: 0,
     highlight: '',
     badges: [],
-    hasReported: false // 防重复上报标记
+    hasReported: false, // 防重复上报标记
+    mode: '', // 游戏模式
+    roomId: '', // 房间号（用于在线对战）
+    gameId: '' // 游戏ID（用于在线对战）
   },
 
   onLoad(query) {
@@ -35,17 +38,23 @@ Page({
     if (moves > 0 && moves <= 20) badges.push('速战速决');
     if (result === GameResult.Timeout) badges.push('保持专注，留意计时');
 
+    const mode = query.mode || '';
+    const roomId = query.roomId || '';
+    const gameId = query.gameId || '';
+    
     this.setData({
       resultText: resultTextMap[result],
       subText: highlight,
       moves,
       highlight,
-      badges
+      badges,
+      mode: mode,
+      roomId: roomId,
+      gameId: gameId
     });
     
     // 上报战绩（只在人机对战模式下上报，且用户已登录）
     const playerResult = query.playerResult;
-    const mode = query.mode;
     // 优先从 query 获取 dedupeKey，如果缺失则从 storage 获取
     let dedupeKey = query.dedupeKey;
     if (!dedupeKey) {
@@ -132,7 +141,58 @@ Page({
     });
   },
 
+  // 在线对战再来一局
+  async playAgainOnline() {
+    const roomId = this.data.roomId;
+    if (!roomId) {
+      wx.showToast({
+        title: '房间信息缺失',
+        icon: 'none'
+      });
+      return;
+    }
+    
+    try {
+      wx.showLoading({ title: '准备中...' });
+      
+      const result = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'resetRoomForNext',
+          roomId: roomId
+        }
+      });
+      
+      wx.hideLoading();
+      
+      if (result.result.success) {
+        // 跳转到房间页（使用 roomId）
+        wx.redirectTo({
+          url: `/pages/room/index?roomId=${roomId}`
+        });
+      } else {
+        wx.showToast({
+          title: result.result.errMsg || '重置房间失败',
+          icon: 'none'
+        });
+      }
+    } catch (error) {
+      wx.hideLoading();
+      wx.showToast({
+        title: error.message || '重置房间失败',
+        icon: 'none'
+      });
+    }
+  },
+
   restart() {
+    // 在线对战模式：调用 playAgainOnline
+    if (this.data.mode === 'PVP_ONLINE') {
+      this.playAgainOnline();
+      return;
+    }
+    
+    // 非在线对战模式：使用原有逻辑（PVE/PVP_LOCAL）
     const config = wx.getStorageSync('lastConfig');
     if (config) {
       const { mode, aiLevel, timeLimitPerPlayer } = config;

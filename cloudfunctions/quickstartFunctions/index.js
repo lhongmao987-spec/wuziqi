@@ -922,6 +922,7 @@ const leaveRoom = async (event) => {
       };
     }
     
+    // 先查询房间信息，判断是否需要查询 users
     const roomResult = await db.collection('rooms').doc(roomDocId).get();
     if (!roomResult.data) {
       return {
@@ -931,39 +932,253 @@ const leaveRoom = async (event) => {
     }
     
     const room = roomResult.data;
+    let userInfo = null;
     
-    // 如果是创建者离开，删除房间
-    if (room.creator.openid === openid) {
-      await db.collection('rooms').doc(roomDocId).remove();
-      return {
-        success: true,
-        data: { deleted: true }
-      };
-    }
-    
-    // 如果是玩家2离开，清空玩家2信息，状态改为waiting
-    if (room.player2 && room.player2.openid === openid) {
-      await db.collection('rooms').doc(roomDocId).update({
-        data: {
-          player2: {
-            openid: '',
-            nickName: '',
-            avatarUrl: ''
-          },
-          status: 'waiting',
-          updatedAt: new Date()
+    // 如果是创建者离开且 player2 还在，需要查询 player2 的用户信息
+    if (room.creator && room.creator.openid === openid && 
+        room.player2 && room.player2.openid && room.player2.openid.trim() !== '') {
+      try {
+        const userResult = await db.collection('users').where({
+          _openid: room.player2.openid
+        }).get();
+        if (userResult.data && userResult.data.length > 0) {
+          userInfo = userResult.data[0];
         }
-      });
-      return {
-        success: true,
-        data: { deleted: false }
-      };
+      } catch (e) {
+        console.warn('查询用户信息失败，使用房间中的信息:', e);
+      }
     }
     
+    // 进入事务执行更新
+    return await db.runTransaction(async (transaction) => {
+      const roomsCol = transaction.collection('rooms');
+      const roomDoc = await roomsCol.doc(roomDocId).get();
+      
+      if (!roomDoc.data) {
+        return {
+          success: false,
+          errMsg: '房间不存在'
+        };
+      }
+      
+      const currentRoom = roomDoc.data;
+      
+      // 如果是创建者离开
+      if (currentRoom.creator && currentRoom.creator.openid === openid) {
+        // 禁止在 playing 状态时继承，且必须要求 gameId 为空才允许继承
+        const isPlaying = currentRoom.status === 'playing';
+        const hasGameId = currentRoom.gameId && currentRoom.gameId.trim() !== '';
+        
+        if (isPlaying || hasGameId) {
+          // 游戏进行中或已有 gameId，不允许继承，直接删除房间
+          await roomsCol.doc(roomDocId).remove();
+          return {
+            success: true,
+            data: { deleted: true, reason: 'playing_or_has_gameId' }
+          };
+        }
+        
+        // 如果 player2 还在，提升 player2 为 creator
+        if (currentRoom.player2 && currentRoom.player2.openid && currentRoom.player2.openid.trim() !== '') {
+          // 使用房间中的信息，如果查询到了 users 信息则优先使用
+          let newCreator = {
+            openid: currentRoom.player2.openid,
+            nickName: currentRoom.player2.nickName || '',
+            avatarUrl: currentRoom.player2.avatarUrl || '',
+            avatarFileId: currentRoom.player2.avatarFileId || ''
+          };
+          
+          // 如果查询到了 users 中的信息，使用更完整的信息
+          if (userInfo) {
+            newCreator.nickName = userInfo.nickName || newCreator.nickName;
+            newCreator.avatarFileId = userInfo.avatarFileId || newCreator.avatarFileId;
+          }
+          
+          // 提升 player2 为 creator，清空 player2
+          await roomsCol.doc(roomDocId).update({
+            data: {
+              creator: newCreator,
+              player2: {
+                openid: '',
+                nickName: '',
+                avatarUrl: '',
+                avatarFileId: ''
+              },
+              status: 'waiting',
+              updatedAt: db.serverDate()
+            }
+          });
+          
+          return {
+            success: true,
+            data: { deleted: false, promoted: true }
+          };
+        } else {
+          // player2 不在，删除房间
+          await roomsCol.doc(roomDocId).remove();
+          return {
+            success: true,
+            data: { deleted: true }
+          };
+        }
+      }
+      
+      // 如果是玩家2离开，清空玩家2信息，状态改为waiting
+      if (currentRoom.player2 && currentRoom.player2.openid === openid) {
+        await roomsCol.doc(roomDocId).update({
+          data: {
+            player2: {
+              openid: '',
+              nickName: '',
+              avatarUrl: '',
+              avatarFileId: ''
+            },
+            status: 'waiting',
+            updatedAt: db.serverDate()
+          }
+        });
+        return {
+          success: true,
+          data: { deleted: false }
+        };
+      }
+      
+      return {
+        success: false,
+        errMsg: '你不是房间成员'
+      };
+    });
+  } catch (e) {
     return {
       success: false,
-      errMsg: '你不是房间成员'
+      errMsg: e.message || e
     };
+  }
+};
+
+// 重置房间准备下一局
+const resetRoomForNext = async (event) => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    const roomId = event.roomId; // 使用房间号而不是 roomDocId
+    
+    if (!roomId) {
+      return {
+        success: false,
+        errMsg: '房间号不能为空'
+      };
+    }
+    
+    // 先查询房间信息，判断是否需要查询 users（在事务外）
+    const roomResult = await db.collection('rooms').where({ roomId: roomId }).get();
+    
+    if (!roomResult.data || roomResult.data.length === 0) {
+      return {
+        success: false,
+        errMsg: '房间不存在'
+      };
+    }
+    
+    const room = roomResult.data[0];
+    const roomDocId = room._id; // 获取房间文档ID
+    
+    // 校验调用者必须是 creator 或 player2
+    const isCreator = room.creator && room.creator.openid === openid;
+    const isPlayer2 = room.player2 && room.player2.openid && room.player2.openid === openid;
+    
+    if (!isCreator && !isPlayer2) {
+      return {
+        success: false,
+        errMsg: '无权限操作'
+      };
+    }
+    
+    // 若 creator.openid 为空/不存在（房主已离开），需要查询用户信息
+    let userInfo = null;
+    if (!room.creator || !room.creator.openid || room.creator.openid.trim() === '') {
+      try {
+        const userResult = await db.collection('users').where({
+          _openid: openid
+        }).get();
+        if (userResult.data && userResult.data.length > 0) {
+          userInfo = userResult.data[0];
+        }
+      } catch (e) {
+        console.warn('查询用户信息失败，使用默认值:', e);
+      }
+    }
+    
+    // 进入事务执行更新
+    return await db.runTransaction(async (transaction) => {
+      const roomsCol = transaction.collection('rooms');
+      
+      // 重新获取房间数据（事务内）
+      const currentRoomDoc = await roomsCol.doc(roomDocId).get();
+      if (!currentRoomDoc.data) {
+        return {
+          success: false,
+          errMsg: '房间不存在'
+        };
+      }
+      
+      const currentRoom = currentRoomDoc.data;
+      
+      // 若 creator.openid 为空/不存在（房主已离开）
+      if (!currentRoom.creator || !currentRoom.creator.openid || currentRoom.creator.openid.trim() === '') {
+        // 调用者继承为 creator
+        let newCreator = {
+          openid: openid,
+          nickName: '',
+          avatarUrl: '',
+          avatarFileId: ''
+        };
+        
+        // 如果查询到了 users 中的信息，使用更完整的信息
+        if (userInfo) {
+          newCreator.nickName = userInfo.nickName || '';
+          newCreator.avatarFileId = userInfo.avatarFileId || '';
+        }
+        
+        // 清空 player2，status='waiting'，清空 gameId
+        await roomsCol.doc(roomDocId).update({
+          data: {
+            creator: newCreator,
+            player2: {
+              openid: '',
+              nickName: '',
+              avatarUrl: '',
+              avatarFileId: ''
+            },
+            status: 'waiting',
+            gameId: null,
+            updatedAt: db.serverDate()
+          }
+        });
+        
+        return {
+          success: true,
+          data: { inherited: true, roomId: room.roomId }
+        };
+      }
+      
+      // 若房主仍在：清空 gameId，status = (player2 存在 ? 'ready' : 'waiting')
+      const hasPlayer2 = currentRoom.player2 && currentRoom.player2.openid && currentRoom.player2.openid.trim() !== '';
+      const newStatus = hasPlayer2 ? 'ready' : 'waiting';
+      
+      await roomsCol.doc(roomDocId).update({
+        data: {
+          gameId: null,
+          status: newStatus,
+          updatedAt: db.serverDate()
+        }
+      });
+      
+      return {
+        success: true,
+        data: { status: newStatus, roomId: room.roomId }
+      };
+    });
   } catch (e) {
     return {
       success: false,
@@ -1845,6 +2060,8 @@ exports.main = async (event, context) => {
       return await updateRoomStatus(event);
     case "leaveRoom":
       return await leaveRoom(event);
+    case "resetRoomForNext":
+      return await resetRoomForNext(event);
     case "updateGameState":
       return await updateGameState(event);
     case "getGameState":

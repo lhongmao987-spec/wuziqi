@@ -19,6 +19,9 @@ Page({
     retryTimer: null
   },
 
+  // 实例变量：标记是否正在跳转到游戏页面
+  _navigatingToGame: false,
+
   async onLoad(options) {
     const roomId = options.roomId;
     const roomDocId = options.roomDocId;
@@ -72,6 +75,25 @@ Page({
   },
 
   onUnload() {
+    // 如果正在跳转到游戏页面，不调用 leaveRoom
+    if (this._navigatingToGame) {
+      console.log('[onUnload] 正在跳转到游戏页面，跳过 leaveRoom');
+      // 清理所有资源
+      if (this.data.roomWatcher) {
+        this.data.roomWatcher.close();
+        this.setData({ roomWatcher: null });
+      }
+      if (this.data.pollTimer) {
+        clearInterval(this.data.pollTimer);
+        this.setData({ pollTimer: null });
+      }
+      if (this.data.retryTimer) {
+        clearTimeout(this.data.retryTimer);
+        this.setData({ retryTimer: null });
+      }
+      return;
+    }
+    
     // 清理所有资源
     if (this.data.roomWatcher) {
       this.data.roomWatcher.close();
@@ -84,6 +106,24 @@ Page({
     if (this.data.retryTimer) {
       clearTimeout(this.data.retryTimer);
       this.setData({ retryTimer: null });
+    }
+    
+    // 调用云函数离开房间（静默调用，不显示 loading）
+    if (this.data.roomDocId) {
+      wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'leaveRoom',
+          roomDocId: this.data.roomDocId
+        },
+        success: (res) => {
+          console.log('[onUnload] 离开房间成功:', res.result);
+        },
+        fail: (err) => {
+          console.error('[onUnload] 离开房间失败:', err);
+          // 静默失败，不影响用户体验
+        }
+      });
     }
   },
 
@@ -227,6 +267,8 @@ Page({
 
     // 如果游戏已开始，跳转到游戏页面（只允许跳转一次）
     if (room.status === 'playing' && room.gameId && !this.data.hasRedirected) {
+      // 标记正在跳转到游戏页面
+      this._navigatingToGame = true;
       this.setData({
         hasRedirected: true
       });
@@ -509,6 +551,8 @@ Page({
 
       if (result.result.success) {
         const gameId = result.result.data.gameId;
+        // 标记正在跳转到游戏页面
+        this._navigatingToGame = true;
         // 跳转到游戏页面
         wx.redirectTo({
           url: `/pages/game/index?mode=PVP_ONLINE&gameId=${gameId}&roomDocId=${this.data.roomDocId}&isCreator=true`

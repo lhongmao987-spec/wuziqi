@@ -28,6 +28,7 @@ Page({
     clientGameId: '', // 客户端生成的游戏ID（用于去重，PVE/PVP_LOCAL模式）
     // 在线对战相关
     gameId: '',
+    roomId: '', // 房间号
     roomDocId: '',
     isCreator: false,
     myPlayer: Player.Black, // 当前玩家的身份（黑或白）
@@ -217,6 +218,13 @@ Page({
 
       if (result.result.success) {
         const game = result.result.data;
+        
+        // 保存 roomId（从 game 数据中获取）
+        if (game.roomId) {
+          this.setData({
+            roomId: game.roomId
+          });
+        }
         
         // 读取游戏设置
         const settings = wx.getStorageSync('gameSettings') || {};
@@ -1250,7 +1258,19 @@ Page({
       `difficulty=${state.config.aiLevel || ''}`,
       `duration=${duration}`,
       `dedupeKey=${dedupeKey}`
-    ].filter(p => p.split('=')[1] !== '').join('&');
+    ];
+    
+    // 在线对战模式：传递 roomId 和 gameId
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      if (this.data.roomId) {
+        params.push(`roomId=${this.data.roomId}`);
+      }
+      if (this.data.gameId) {
+        params.push(`gameId=${this.data.gameId}`);
+      }
+    }
+    
+    const paramsStr = params.filter(p => p.split('=')[1] !== '').join('&');
     
     // 在线模式使用 redirectTo，非在线模式使用 navigateTo
     const jumpMethod = state.config.mode === GameMode.PVP_ONLINE ? wx.redirectTo : wx.navigateTo;
@@ -1258,7 +1278,7 @@ Page({
     // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时
     setTimeout(() => {
       jumpMethod({ 
-        url: `/pages/result/index?${params}`,
+        url: `/pages/result/index?${paramsStr}`,
         success: () => {
           console.log('跳转到结算页面成功');
         },
@@ -1267,7 +1287,7 @@ Page({
           // 如果 redirectTo 失败，尝试 navigateTo 作为备选方案
           if (state.config.mode === GameMode.PVP_ONLINE) {
             wx.navigateTo({
-              url: `/pages/result/index?${params}`,
+              url: `/pages/result/index?${paramsStr}`,
               success: () => {
                 console.log('navigateTo 跳转成功');
               },
