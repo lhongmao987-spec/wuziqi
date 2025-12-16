@@ -21,8 +21,9 @@ const calculateScore = (winCount, totalGames) => {
 const updateUserStatsAfterGame = async (event) => {
   try {
     const wxContext = cloud.getWXContext();
-    const openid = wxContext.OPENID;
-    const { result, nickName, avatarUrl, gameMode, opponentType } = event.data || {};
+    // 支持传入 openid 参数（用于批量更新，如在线对战终局）
+    const { result, nickName, avatarUrl, gameMode, opponentType, openid: providedOpenid } = event.data || {};
+    const openid = providedOpenid || wxContext.OPENID;
     
     // 参数校验
     if (!result || !['win', 'lose', 'draw'].includes(result)) {
@@ -32,7 +33,7 @@ const updateUserStatsAfterGame = async (event) => {
       };
     }
     
-    // 获取或创建用户信息
+    // 获取或创建用户信息（必须从 users 集合获取，确保使用最新的 nickName）
     let userInfo = null;
     const userResult = await db.collection('users').where({
       _openid: openid
@@ -54,26 +55,31 @@ const updateUserStatsAfterGame = async (event) => {
       userInfo = { _id: addResult._id, ...newUser };
     }
     
-    // 同步昵称和头像（如果传入）
+    // 同步昵称和头像（如果传入且与 users 集合中的不一致）
     // 注意：这里只同步 users 表，不处理 avatarFileId（应该在 saveUserInfo 中处理）
-    if (nickName || avatarUrl) {
-      const updateData = {};
-      if (nickName) updateData.nickName = nickName;
-      if (avatarUrl) {
-        // 过滤掉临时路径
+    // 重要：updateUserStatsAfterGame 只能更新 userStats，不允许 update users 表的 nickName/avatarUrl（否则会污染用户资料）
+    // 如果传入的 nickName/avatarUrl 与 users 集合中的不一致，说明传入的是旧数据，应该使用 users 集合中的最新数据
+    // 因此这里不再更新 users 表，只使用 users 集合中的最新数据
+    if (userInfo) {
+      // 使用 users 集合中的最新 nickName 和 avatarUrl，忽略传入的参数（避免污染）
+      if (!userInfo.nickName && nickName) {
+        // 如果 users 集合中没有 nickName，且传入了 nickName，则更新 users 表
+        const updateData = { nickName: nickName, updateTime: new Date() };
+        await db.collection('users').where({ _openid: openid }).update({ data: updateData });
+        userInfo.nickName = nickName;
+      }
+      if (!userInfo.avatarUrl && avatarUrl) {
+        // 如果 users 集合中没有 avatarUrl，且传入了有效的 avatarUrl，则更新 users 表
         const avatarUrlToSave = avatarUrl;
         if (!avatarUrlToSave.includes('127.0.0.1') && 
             !avatarUrlToSave.includes('__tmp__') && 
             !avatarUrlToSave.startsWith('wxfile://') &&
             !avatarUrlToSave.startsWith('http://localhost') &&
             (avatarUrlToSave.startsWith('https://') || !avatarUrlToSave.startsWith('http://'))) {
-          updateData.avatarUrl = avatarUrlToSave;
+          const updateData = { avatarUrl: avatarUrlToSave, updateTime: new Date() };
+          await db.collection('users').where({ _openid: openid }).update({ data: updateData });
+          userInfo.avatarUrl = avatarUrlToSave;
         }
-      }
-      updateData.updateTime = new Date();
-      await db.collection('users').where({ _openid: openid }).update({ data: updateData });
-      if (userInfo) {
-        Object.assign(userInfo, updateData);
       }
     }
     

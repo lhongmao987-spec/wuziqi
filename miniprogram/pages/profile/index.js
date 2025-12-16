@@ -8,29 +8,31 @@ Page({
     tempAvatarUrl: '',
     tempAvatarFileId: '', // 临时头像 fileID（云存储）
     stats: {
-      games: 0,
-      wins: 0,
-      streak: 0,
+      games: 36,
+      wins: 22,
+      streak: 3,
       bestAi: '中级'
     },
-    recent: []
+    recent: [
+      { opponent: 'AI', result: '胜', moves: 32 },
+      { opponent: '好友', result: '负', moves: 40 },
+      { opponent: 'AI', result: '胜', moves: 24 }
+    ]
   },
 
   onLoad() {
     // 页面加载时从数据库获取用户信息
     this.loadUserInfo();
-    // 加载战绩数据
+    // 加载用户战绩和最近对局
     this.loadUserStats();
-    // 加载最近对局
     this.loadRecentGames();
   },
 
   onShow() {
     // 每次显示页面时重新加载用户信息
     this.loadUserInfo();
-    // 重新加载战绩数据（可能在其他页面有更新）
+    // 重新加载用户战绩和最近对局（可能有更新）
     this.loadUserStats();
-    // 重新加载最近对局
     this.loadRecentGames();
   },
 
@@ -213,8 +215,9 @@ Page({
 
   // 保存临时用户信息（自动保存）
   _saveTempUserInfo() {
-    const userInfo = {};
-    userInfo.nickName = this.data.tempNickName?.trim() || '微信用户';
+    const userInfo = {
+      nickName: this.data.tempNickName?.trim() || '微信用户'
+    };
     
     // 如果有 fileID，使用 fileID；否则使用 avatarUrl
     if (this.data.tempAvatarFileId) {
@@ -418,7 +421,7 @@ Page({
       },
       success: (res) => {
         if (res.result.success && res.result.data) {
-          const records = res.result.data.map(record => ({
+          const records = res.result.data.map((record) => ({
             opponent: record.opponentName || (record.opponentType === 'AI' ? 'AI' : record.opponentType === '好友' ? '好友' : '本机'),
             result: record.result || '负',
             moves: record.moves || 0

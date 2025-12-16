@@ -9,16 +9,18 @@
     <view class="player">
       <view class="player-meta">
         <view class="player-name">你</view>
-        <view class="player-role">{{myColor === players.White ? '白棋' : '黑棋'}}</view>
+        <view class="player-role">{{myRoleText}}</view>
       </view>
-      <view class="current-turn" wx:if="{{currentPlayer === players.Black}}">轮到你</view>
+      <view class="current-turn" wx:if="{{canPlay && currentPlayer === myColor}}">轮到你</view>
+      <view class="current-turn" wx:if="{{!canPlay || currentPlayer !== myColor}}">等待对手</view>
     </view>
     <view class="player">
       <view class="player-meta" style="align-items: flex-end;">
         <view class="player-name">{{opponentLabel}}</view>
-        <view class="player-role">{{myColor === players.White ? '黑棋' : '白棋'}}</view>
+        <view class="player-role">{{opponentRoleText}}</view>
       </view>
-      <view class="current-turn" wx:if="{{currentPlayer === players.White}}">对手思考中</view>
+      <view class="current-turn" wx:if="{{canPlay && currentPlayer === myColor}}">对手思考中</view>
+      <view class="current-turn" wx:if="{{!canPlay || currentPlayer !== myColor}}">对手回合</view>
     </view>
   </view>
 
@@ -52,7 +54,7 @@
         class="action-btn primary"
         bindtap="onTapRollDice"
         loading="{{rollAnimating}}"
-        disabled="{{rollAnimating || rolledMe}}"
+        disabled="{{rollAnimating || rolledMe || rollDone}}"
       >{{rolledMe ? '等待对手' : '点击掷骰'}}</button>
     </view>
   </view>

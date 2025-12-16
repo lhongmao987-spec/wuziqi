@@ -4,22 +4,6 @@ Page({
     loading: true, // 加载状态
     currentUser: null, // 当前用户信息
     currentUserOpenId: '', // 当前用户openid（用于判断）
-    // currentUser 结构：
-    // {
-    //   rank: 10, // 排名（如果已上榜）
-    //   notRanked: false, // 是否未上榜
-    //   needGames: 0, // 还差几场（如果未上榜）
-    //   stats: { // 用户战绩
-    //     nickName: 'xxx',
-    //     avatarUrl: 'xxx',
-    //     winCount: 10,
-    //     loseCount: 5,
-    //     totalGames: 15,
-    //     maxStreak: 5,
-    //     winRate: 0.67,
-    //     score: 85.5
-    //   }
-    // }
     total: 0 // 总上榜人数
   },
 

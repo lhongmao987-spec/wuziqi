@@ -987,34 +987,46 @@ const rollDice = async (event) => {
         return { success: true, data: { roll: rollObj } };
       }
 
+      const p1 = game.player1.openid;
+      const p2 = game.player2.openid;
       const myRoll = Math.floor(1 + Math.random() * 6);
       rollObj[openid] = {
         value: myRoll,
         at: db.serverDate()
       };
 
-      const opponentOpenid = game.player1.openid === openid ? game.player2.openid : game.player1.openid;
+      const opponentOpenid = openid === p1 ? p2 : p1;
       const oppRoll = opponentOpenid ? rollObj[opponentOpenid] : null;
 
-      let updateData = {
+      const updateData = {
         roll: rollObj,
-        updatedAt: db.serverDate()
+        updatedAt: db.serverDate(),
+        phase: 'ROLL_WAIT'
       };
 
       if (oppRoll && typeof oppRoll.value === 'number') {
-        if (myRoll === oppRoll.value) {
-          // 相同点数，清空等待重新掷
+        const p1Val = rollObj[p1] ? rollObj[p1].value : null;
+        const p2Val = rollObj[p2] ? rollObj[p2].value : null;
+        const rollResult = { p1: p1Val, p2: p2Val };
+        if (p1Val === p2Val) {
           updateData.roll = {};
+          updateData.rollResult = rollResult;
+          updateData.phase = 'ROLL_AGAIN';
+          updateData.blackOpenid = '';
+          updateData.whiteOpenid = '';
+          updateData.firstPlayerOpenid = '';
         } else {
-          const firstPlayerOpenid = myRoll > oppRoll.value ? openid : opponentOpenid;
-          const secondOpenid = myRoll > oppRoll.value ? opponentOpenid : openid;
+          const firstPlayerOpenid = p1Val > p2Val ? p1 : p2;
+          const secondOpenid = p1Val > p2Val ? p2 : p1;
           updateData.roll = {
-            [openid]: rollObj[openid],
-            [opponentOpenid]: oppRoll,
-            firstPlayerOpenid,
-            blackOpenid: firstPlayerOpenid,
-            whiteOpenid: secondOpenid
+            [p1]: rollObj[p1],
+            [p2]: rollObj[p2]
           };
+          updateData.rollResult = rollResult;
+          updateData.blackOpenid = firstPlayerOpenid;
+          updateData.whiteOpenid = secondOpenid;
+          updateData.firstPlayerOpenid = firstPlayerOpenid;
+          updateData.phase = 'ROLL_DONE';
           if (game.gameState && game.gameState.config && game.gameState.config.mode === 'PVP_ONLINE') {
             game.gameState.currentPlayer = 'BLACK';
             if (game.gameState.timeState) {
@@ -1030,7 +1042,7 @@ const rollDice = async (event) => {
       await gameRef.update({
         data: updateData
       });
-      return { success: true, data: { roll: updateData.roll } };
+      return { success: true, data: { roll: updateData.roll, rollResult: updateData.rollResult, phase: updateData.phase } };
     });
     return res;
   } catch (e) {
@@ -1080,10 +1092,37 @@ const finalizeOnlineGame = async (game, gameState, gameId) => {
   if (!game || !game.player1 || !game.player2) return;
   const result = gameState.result;
   const winner = gameState.winner; // BLACK / WHITE / NONE
-  const players = [
-    { openid: game.player1.openid, nickName: game.player1.nickName || '', avatarUrl: game.player1.avatarUrl || '' },
-    { openid: game.player2.openid, nickName: game.player2.nickName || '', avatarUrl: game.player2.avatarUrl || '' },
-  ];
+  
+  // 从 users 集合获取每个玩家的最新 nickName 和 avatarUrl（避免昵称污染）
+  const player1Openid = game.player1.openid;
+  const player2Openid = game.player2.openid;
+  
+  // 获取玩家1的最新信息
+  let player1Info = { openid: player1Openid, nickName: '', avatarUrl: '' };
+  try {
+    const user1Result = await db.collection('users').where({ _openid: player1Openid }).get();
+    if (user1Result.data && user1Result.data.length > 0) {
+      player1Info.nickName = user1Result.data[0].nickName || '';
+      player1Info.avatarUrl = user1Result.data[0].avatarUrl || '';
+    }
+  } catch (e) {
+    console.error('获取玩家1信息失败:', e);
+  }
+  
+  // 获取玩家2的最新信息
+  let player2Info = { openid: player2Openid, nickName: '', avatarUrl: '' };
+  try {
+    const user2Result = await db.collection('users').where({ _openid: player2Openid }).get();
+    if (user2Result.data && user2Result.data.length > 0) {
+      player2Info.nickName = user2Result.data[0].nickName || '';
+      player2Info.avatarUrl = user2Result.data[0].avatarUrl || '';
+    }
+  } catch (e) {
+    console.error('获取玩家2信息失败:', e);
+  }
+  
+  const players = [player1Info, player2Info];
+  
   for (const p of players) {
     if (!p.openid) continue;
     const dedupeKey = `online_${gameId}_${p.openid}`;
@@ -1097,20 +1136,22 @@ const finalizeOnlineGame = async (game, gameState, gameId) => {
     let outcome = 'draw';
     if (winner === 'BLACK') {
       outcome = p.openid === game.player1.openid ? 'win' : 'lose';
-      if (game.roll && game.roll.blackOpenid) {
-        outcome = p.openid === game.roll.blackOpenid ? 'win' : 'lose';
+      if (game.blackOpenid) {
+        outcome = p.openid === game.blackOpenid ? 'win' : 'lose';
       }
     } else if (winner === 'WHITE') {
       outcome = p.openid === game.player1.openid ? 'lose' : 'win';
-      if (game.roll && game.roll.whiteOpenid) {
-        outcome = p.openid === game.roll.whiteOpenid ? 'win' : 'lose';
+      if (game.whiteOpenid) {
+        outcome = p.openid === game.whiteOpenid ? 'win' : 'lose';
       }
     }
-    const opponent = p.openid === game.player1.openid ? game.player2 : game.player1;
+    
+    // 对手信息：使用从 users 集合获取的最新信息
+    const opponent = p.openid === player1Openid ? player2Info : player1Info;
     const gameRecord = {
       playerOpenId: p.openid,
       opponentOpenId: opponent.openid,
-      opponentName: opponent.nickName || '',
+      opponentName: opponent.nickName || '', // 对手昵称可以写，但不覆盖自己的
       result: outcome === 'win' ? '胜' : outcome === 'lose' ? '负' : '和',
       moves: (gameState.moves || []).length,
       duration: gameState.duration || 0,
@@ -1120,13 +1161,18 @@ const finalizeOnlineGame = async (game, gameState, gameId) => {
       createTime: new Date()
     };
     await db.collection('gameRecords').add({ data: gameRecord });
+    
+    // 更新 userStats 时，nickName/avatarUrl 必须来自 users 集合里该玩家的记录
+    // updateUserStatsAfterGame 支持传入 openid 参数，会使用该 openid 而不是 wxContext.OPENID
+    // 传入的 nickName 和 avatarUrl 来自 users 集合（已在上面获取），updateUserStatsAfterGame 会优先使用 users 集合中的最新数据
     await updateUserStatsAfterGame({
       data: {
         result: outcome,
-        nickName: p.nickName,
-        avatarUrl: p.avatarUrl,
+        nickName: p.nickName, // 来自 users 集合的最新 nickName（用于初始化，实际使用 users 集合中的）
+        avatarUrl: p.avatarUrl, // 来自 users 集合的最新 avatarUrl（用于初始化，实际使用 users 集合中的）
         gameMode: 'PVP_ONLINE',
-        opponentType: 'ONLINE'
+        opponentType: 'ONLINE',
+        openid: p.openid // 传入 openid，updateUserStatsAfterGame 会使用该 openid
       }
     });
   }

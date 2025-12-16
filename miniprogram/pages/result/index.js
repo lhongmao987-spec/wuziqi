@@ -1,4 +1,4 @@
-const { GameResult, Player } = require('../../core/types');
+import { GameResult, Player } from '../../core/types';
 
 const resultTextMap = {
   [GameResult.BlackWin]: '黑棋胜利',
@@ -16,7 +16,8 @@ Page({
     subText: '',
     moves: 0,
     highlight: '',
-    badges: []
+    badges: [],
+    hasReported: false // 防重复上报标记
   },
 
   onLoad(query) {
@@ -45,25 +46,27 @@ Page({
     // 上报战绩（只在人机对战模式下上报，且用户已登录）
     const playerResult = query.playerResult;
     const mode = query.mode;
+    // 优先从 query 获取 dedupeKey，如果缺失则从 storage 获取
+    let dedupeKey = query.dedupeKey;
+    if (!dedupeKey) {
+      dedupeKey = wx.getStorageSync('currentDedupeKey') || '';
+      console.log('从 storage 获取 dedupeKey:', dedupeKey);
+    }
     
-    // 按优先级获取 dedupeKey：1. query参数 2. storage 3. 生成新的（兜底）
-    let dedupeKey = query.dedupeKey || '';
-    if (!dedupeKey) {
-      dedupeKey = wx.getStorageSync('dedupeKey') || '';
+    // 第一道保险：检查是否已上报过
+    if (this.data.hasReported) {
+      console.log('已上报过，跳过重复上报');
+      return;
     }
-    if (!dedupeKey) {
-      // 如果仍然为空，立即生成一个新的并写入 storage（兜底）
-      dedupeKey = 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2);
-      console.warn('[FINAL] result页面兜底生成 dedupeKey=', dedupeKey);
-      wx.setStorageSync('dedupeKey', dedupeKey);
-    }
-    console.log('[FINAL] dedupeKey=', dedupeKey);
     
     if (playerResult && mode && mode !== 'PVP_LOCAL' && dedupeKey) {
       // 检查用户是否已登录
       const userInfo = wx.getStorageSync('userInfo');
       if (userInfo && userInfo.nickName && userInfo.nickName.trim() !== '') {
-        // 用户已登录，上报战绩（必须传递 dedupeKey）
+        // 设置标记，防止重复上报
+        this.setData({ hasReported: true });
+        
+        // 用户已登录，上报战绩
         this.reportGameResult({
           result: playerResult,
           moves: moves,
@@ -72,32 +75,26 @@ Page({
           opponentName: query.opponentName || 'AI',
           difficulty: query.difficulty || '',
           duration: Number(query.duration || 0),
-          dedupeKey: dedupeKey // 必须传递 dedupeKey
+          dedupeKey: dedupeKey // 传递去重键
         });
       } else {
         // 用户未登录，不保存战绩
         console.log('用户未登录，不保存战绩');
       }
-    } else if (playerResult && mode && mode !== 'PVP_LOCAL' && !dedupeKey) {
-      console.error('[FINAL] 错误：dedupeKey 为空，无法上报战绩');
     }
   },
 
   // 上报对局结果
   reportGameResult(gameData) {
-    // 确保 dedupeKey 存在
-    if (!gameData.dedupeKey) {
-      console.error('[FINAL] 错误：reportGameResult 时 dedupeKey 为空');
-      // 尝试从 storage 获取
-      gameData.dedupeKey = wx.getStorageSync('dedupeKey') || '';
-      if (!gameData.dedupeKey) {
-        // 如果仍然为空，生成新的
-        gameData.dedupeKey = 'g_' + Date.now() + '_' + Math.random().toString(16).slice(2);
-        console.warn('[FINAL] reportGameResult 兜底生成 dedupeKey=', gameData.dedupeKey);
-        wx.setStorageSync('dedupeKey', gameData.dedupeKey);
+    // 第二道保险：再次检查标记
+    if (this.data.hasReported && gameData.dedupeKey) {
+      // 检查本地存储中是否已记录该dedupeKey
+      const reportedKeys = wx.getStorageSync('reportedDedupeKeys') || [];
+      if (reportedKeys.includes(gameData.dedupeKey)) {
+        console.log('该对局已上报过（本地检查）');
+        return;
       }
     }
-    console.log('[FINAL] 上报 dedupeKey=', gameData.dedupeKey);
     
     wx.cloud.callFunction({
       name: 'quickstartFunctions',
@@ -107,17 +104,30 @@ Page({
       },
       success: (res) => {
         if (res.result.success) {
-          console.log('战绩上报成功', res.result.data && res.result.data.alreadyReported ? '（已上报过）' : '');
+          console.log('战绩上报成功', res.result.data.alreadyReported ? '（已上报过）' : '');
+          
+          // 如果上报成功，记录dedupeKey到本地存储（最多保存100个）
+          if (gameData.dedupeKey) {
+            const reportedKeys = wx.getStorageSync('reportedDedupeKeys') || [];
+            reportedKeys.push(gameData.dedupeKey);
+            // 只保留最近100个
+            if (reportedKeys.length > 100) {
+              reportedKeys.shift();
+            }
+            wx.setStorageSync('reportedDedupeKeys', reportedKeys);
+          }
         } else {
           console.error('战绩上报失败:', res.result.errMsg);
-          // 如果是未登录导致的失败，不显示错误提示（因为这是预期的行为）
-          if (res.result.errMsg && res.result.errMsg.indexOf('未登录') === -1) {
-            // 其他错误可以在这里处理
+          // 如果失败，重置标记，允许重试
+          if (res.result.errMsg && res.result.errMsg.indexOf('dedupeKey') === -1) {
+            this.setData({ hasReported: false });
           }
         }
       },
       fail: (err) => {
         console.error('战绩上报失败:', err);
+        // 网络失败，重置标记，允许重试
+        this.setData({ hasReported: false });
       }
     });
   },

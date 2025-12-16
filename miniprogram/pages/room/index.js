@@ -3,7 +3,7 @@ Page({
     roomId: '',
     roomDocId: '',
     isCreator: false,
-    roomStatus: 'waiting',
+    roomStatus: 'waiting', // waiting / ready / playing / ended
     creatorInfo: {
       openid: '',
       nickName: '',
@@ -18,8 +18,6 @@ Page({
     const roomId = options.roomId;
     const roomDocId = options.roomDocId;
     const isCreator = options.isCreator === 'true';
-
-    console.log('房间页面加载，参数:', { roomId, roomDocId, isCreator });
 
     if (!roomId && !roomDocId) {
       wx.showToast({
@@ -39,12 +37,12 @@ Page({
       isCreator: isCreator
     });
 
-    console.log('房间页面数据已设置:', this.data);
-
+    // 先加载房间信息，加载完成后再开始监听
     this.loadRoomInfo();
   },
 
   onUnload() {
+    // 停止监听
     if (this.data.roomWatcher) {
       this.data.roomWatcher.close();
     }
@@ -68,7 +66,7 @@ Page({
 
       if (result.result.success) {
         const room = result.result.data;
-        await this.updateRoomData(room);
+        this.updateRoomData(room);
         // 加载完房间信息后再开始监听
         this.watchRoom();
       } else {
@@ -90,7 +88,8 @@ Page({
   },
 
   // 更新房间数据
-  async updateRoomData(room) {
+  updateRoomData(room) {
+    // 通过云函数获取当前用户的openid来判断是否是创建者
     const isCreator = this.data.isCreator || room.creator.openid === '';
     
     let statusText = '等待玩家加入...';
@@ -102,45 +101,13 @@ Page({
       statusText = '游戏已结束';
     }
 
-    const fileIds = [];
-    if (room.creator && room.creator.avatarFileId) {
-      fileIds.push(room.creator.avatarFileId);
-    }
-    if (room.player2 && room.player2.avatarFileId) {
-      fileIds.push(room.player2.avatarFileId);
-    }
-    let fileIdUrlMap = {};
-    if (fileIds.length) {
-      try {
-        const res = await wx.cloud.getTempFileURL({
-          fileList: fileIds
-        });
-        if (res && res.fileList) {
-          res.fileList.forEach(item => {
-            if (item.fileID && item.tempFileURL) {
-              fileIdUrlMap[item.fileID] = item.tempFileURL;
-            }
-          });
-        }
-      } catch (err) {
-        console.error('房间头像 fileId 转 URL 失败', err);
-      }
-    }
-
-    const creatorAvatarUrl = room.creator && room.creator.avatarFileId
-      ? (fileIdUrlMap[room.creator.avatarFileId] || '')
-      : (room.creator && room.creator.avatarUrl) || '';
-    const player2AvatarUrl = room.player2 && room.player2.avatarFileId
-      ? (fileIdUrlMap[room.player2.avatarFileId] || '')
-      : (room.player2 && room.player2.avatarUrl) || '';
-
     this.setData({
       roomId: room.roomId || this.data.roomId, // 确保房间号有值
       roomDocId: room._id || this.data.roomDocId,
       isCreator: isCreator,
       roomStatus: room.status,
-      creatorInfo: Object.assign({}, room.creator, { avatarUrl: creatorAvatarUrl }),
-      player2Info: room.player2 ? Object.assign({}, room.player2, { avatarUrl: player2AvatarUrl }) : room.player2,
+      creatorInfo: room.creator || this.data.creatorInfo,
+      player2Info: room.player2,
       statusText: statusText
     });
 
@@ -159,55 +126,37 @@ Page({
       console.warn('roomDocId为空，无法监听房间');
       return;
     }
-  
+
     try {
       const db = wx.cloud.database();
-  
       const watcher = db.collection('rooms').doc(roomDocId).watch({
-        onChange: async (snapshot) => {
-          console.log(
-            '[room.watch] type=',
-            snapshot.type,
-            'docsLen=',
-            snapshot.docs?.length,
-            'changes=',
-            snapshot.docChanges
-          );
-  
-          // ✅ 1) 优先使用 snapshot.docs[0]（大多数情况下最新数据在这里）
-          const roomFromDocs = snapshot.docs && snapshot.docs[0];
-          if (roomFromDocs) {
-            await this.updateRoomData(roomFromDocs);
-            return;
-          }
-  
-          // ✅ 2) 兜底：如果没有 docs，就主动 get 一次最新 room
-          try {
-            const latest = await db.collection('rooms').doc(roomDocId).get();
-            if (latest && latest.data) {
-              await this.updateRoomData(latest.data);
-            }
-          } catch (e) {
-            console.error('[room.watch] fallback get failed:', e);
-          }
-  
-          // ✅ 3) 删除事件（兼容 remove）
-          if (snapshot.type === 'remove') {
-            wx.showToast({ title: '房间已解散', icon: 'none' });
-            setTimeout(() => wx.navigateBack(), 1500);
-          }
-        },
-        onError: (error) => {
-          console.error('监听房间失败:', error);
+      onChange: (snapshot) => {
+        if (snapshot.type === 'update' && snapshot.doc) {
+          const room = snapshot.doc;
+          this.updateRoomData(room);
+        } else if (snapshot.type === 'remove') {
+          wx.showToast({
+            title: '房间已解散',
+            icon: 'none'
+          });
+          setTimeout(() => {
+            wx.navigateBack();
+          }, 1500);
         }
-      });
-  
-      this.setData({ roomWatcher: watcher });
+      },
+      onError: (error) => {
+        console.error('监听房间失败:', error);
+      }
+    });
+
+    this.setData({
+      roomWatcher: watcher
+    });
     } catch (error) {
       console.error('启动房间监听失败:', error);
     }
   },
-  
+
   // 开始游戏
   async startGame() {
     if (!this.data.isCreator || this.data.roomStatus !== 'ready') {
@@ -230,6 +179,7 @@ Page({
 
       if (result.result.success) {
         const gameId = result.result.data.gameId;
+        // 跳转到游戏页面
         wx.redirectTo({
           url: `/pages/game/index?mode=PVP_ONLINE&gameId=${gameId}&roomDocId=${this.data.roomDocId}&isCreator=true`
         });

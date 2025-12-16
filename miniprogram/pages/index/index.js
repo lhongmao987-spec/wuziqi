@@ -1,4 +1,4 @@
-const { GameMode } = require('../../core/types');
+import { GameMode } from '../../core/types';
 
 Page({
   data: {
@@ -59,7 +59,7 @@ Page({
     return {
       title: '来和我一起下五子棋吧！',
       path: '/pages/index/index?invite=true',
-      imageUrl: ''
+      imageUrl: '' // 可以后续添加分享图片
     };
   },
 
@@ -68,13 +68,14 @@ Page({
     return {
       title: '来和我一起下五子棋吧！',
       query: 'invite=true',
-      imageUrl: ''
+      imageUrl: '' // 可以后续添加分享图片
     };
   },
 
   // 处理分享链接进入
   onLoad(options) {
     if (options.invite === 'true') {
+      // 显示邀请提示
       wx.showModal({
         title: '好友邀请',
         content: '你的好友邀请你一起下五子棋！在线对战功能正在开发中，敬请期待。',
@@ -86,27 +87,11 @@ Page({
 
   // 创建房间
   async createRoom() {
-    // 检查用户是否已登录
-    const userInfo = wx.getStorageSync('userInfo') || {};
-    if (!userInfo.nickName || userInfo.nickName.trim() === '') {
-      wx.showModal({
-        title: '提示',
-        content: '请先完善个人信息（设置昵称和头像）才能创建房间',
-        showCancel: false,
-        confirmText: '去设置',
-        success: (res) => {
-          if (res.confirm) {
-            wx.navigateTo({
-              url: '/pages/profile/index'
-            });
-          }
-        }
-      });
-      return;
-    }
-
     try {
       wx.showLoading({ title: '创建中...' });
+
+      // 获取用户信息
+      const userInfo = wx.getStorageSync('userInfo') || {};
       
       const result = await wx.cloud.callFunction({
         name: 'quickstartFunctions',
@@ -123,14 +108,7 @@ Page({
 
       if (result.result.success) {
         const room = result.result.data;
-        console.log('创建房间成功，房间信息:', room);
-        if (!room.roomId || !room._id) {
-          wx.showToast({
-            title: '房间信息不完整',
-            icon: 'none'
-          });
-          return;
-        }
+        // 跳转到房间页面
         wx.navigateTo({
           url: `/pages/room/index?roomId=${room.roomId}&roomDocId=${room._id}&isCreator=true`
         });
@@ -172,33 +150,14 @@ Page({
 
   // 房间号输入
   onRoomIdInput(e) {
-    const value = e.detail.value.replace(/\D/g, '');
+    const value = e.detail.value.replace(/\D/g, ''); // 只保留数字
     this.setData({
-      roomIdInput: value.slice(0, 4)
+      roomIdInput: value.slice(0, 4) // 最多4位
     });
   },
 
   // 加入房间
   async joinRoom() {
-    // 检查用户是否已登录
-    const userInfo = wx.getStorageSync('userInfo') || {};
-    if (!userInfo.nickName || userInfo.nickName.trim() === '') {
-      wx.showModal({
-        title: '提示',
-        content: '请先完善个人信息（设置昵称和头像）才能加入房间',
-        showCancel: false,
-        confirmText: '去设置',
-        success: (res) => {
-          if (res.confirm) {
-            wx.navigateTo({
-              url: '/pages/profile/index'
-            });
-          }
-        }
-      });
-      return;
-    }
-
     const roomId = this.data.roomIdInput.trim();
     
     if (!roomId || roomId.length !== 4) {
@@ -211,6 +170,9 @@ Page({
 
     try {
       wx.showLoading({ title: '加入中...' });
+
+      // 获取用户信息
+      const userInfo = wx.getStorageSync('userInfo') || {};
 
       const result = await wx.cloud.callFunction({
         name: 'quickstartFunctions',
@@ -228,9 +190,11 @@ Page({
 
       if (result.result.success) {
         const room = result.result.data;
+        // 跳转到房间页面
         wx.navigateTo({
           url: `/pages/room/index?roomId=${room.roomId}&roomDocId=${room._id}&isCreator=${result.result.isCreator ? 'true' : 'false'}`
         });
+        // 关闭弹窗
         this.setData({
           showJoinModal: false,
           roomIdInput: ''
