@@ -24,10 +24,10 @@
       <view class="player-card {{!isCreator && player2Info ? 'joined' : ''}}">
         <view class="player-avatar">
           <image wx:if="{{player2Info && player2Info.avatarUrl}}" src="{{player2Info.avatarUrl}}" mode="aspectFill"></image>
-          <view wx:else class="avatar-placeholder">?</view>
+          <view wx:else class="avatar-placeholder">{{player2Info && player2Info.nickName ? player2Info.nickName.charAt(0) : '?'}}</view>
         </view>
         <view class="player-info">
-          <view class="player-name">{{player2Info ? player2Info.nickName : '等待玩家加入'}}</view>
+          <view class="player-name">{{player2Info && player2Info.nickName ? player2Info.nickName : '玩家2'}}</view>
           <view class="player-role">玩家2</view>
         </view>
         <view class="player-status {{player2Info ? 'ready' : 'waiting'}}">
@@ -43,10 +43,10 @@
 
     <!-- 操作按钮 -->
     <view class="actions-section">
-      <button wx:if="{{isCreator && roomStatus === 'waiting'}}" class="action-btn primary" disabled>等待玩家加入...</button>
-      <button wx:if="{{isCreator && roomStatus === 'ready'}}" class="action-btn primary" bindtap="startGame">开始游戏</button>
-      <button wx:if="{{!isCreator && roomStatus === 'waiting'}}" class="action-btn primary" disabled>等待房主开始...</button>
-      <button wx:if="{{!isCreator && roomStatus === 'ready'}}" class="action-btn primary" disabled>等待房主开始...</button>
+      <button wx:if="{{isCreator}}" class="action-btn primary" disabled="{{!canStart}}" bindtap="startGame">
+        {{canStart ? '开始游戏' : '等待玩家加入...'}}
+      </button>
+      <button wx:if="{{!isCreator}}" class="action-btn primary" disabled>等待房主开始...</button>
       <button class="action-btn secondary" bindtap="leaveRoom">离开房间</button>
     </view>
   </view>

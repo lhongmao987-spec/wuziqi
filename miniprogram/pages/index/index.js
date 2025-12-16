@@ -99,7 +99,7 @@ Page({
           type: 'createRoom',
           data: {
             nickName: userInfo.nickName || '',
-            avatarUrl: userInfo.avatarUrl || ''
+            avatarFileId: userInfo.avatarFileId || ''
           }
         }
       });
@@ -181,7 +181,7 @@ Page({
           roomId: roomId,
           data: {
             nickName: userInfo.nickName || '',
-            avatarUrl: userInfo.avatarUrl || ''
+            avatarFileId: userInfo.avatarFileId || ''
           }
         }
       });

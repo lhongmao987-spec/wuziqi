@@ -59,6 +59,24 @@
     </view>
   </view>
 
+  <!-- 骰子结果弹窗：ROLL_DONE 后显示双方点数和先手提示，延迟关闭 -->
+  <view wx:if="{{showRollModal}}" class="roll-overlay">
+    <view class="roll-panel">
+      <view class="roll-title">投骰子结果</view>
+      <view class="roll-dice-row">
+        <view class="dice-box">
+          <view class="dice-label">你</view>
+          <view class="dice-value">{{rollMe || '-'}}</view>
+        </view>
+        <view class="dice-box">
+          <view class="dice-label">对手</view>
+          <view class="dice-value">{{rollOpp || '-'}}</view>
+        </view>
+      </view>
+      <view class="roll-winner-text">{{rollWinnerText}}</view>
+    </view>
+  </view>
+
   <view class="bottom-actions">
     <button class="action-btn btn-undo" bindtap="handleUndo">悔棋</button>
     <button class="action-btn btn-resign" bindtap="handleResign">认输</button>

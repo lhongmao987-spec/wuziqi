@@ -32,6 +32,27 @@ Page({
     isCreator: false,
     myPlayer: Player.Black, // 当前玩家的身份（黑或白）
     gameWatcher: null, // 游戏状态监听器
+    lastStateVersion: 0, // 最后同步的 stateVersion（用于幂等判断）
+    lastStateKey: '', // 最后同步的状态 key（${stateVersion}|${phase}|${result}，用于幂等判断）
+    turnOpenid: '', // 当前回合的 openid（用于超时换手）
+    _timeoutSentKey: '', // 超时换手防抖 key（${stateVersion}|${turnOpenid}）
+    // 投骰子相关
+    showRollOverlay: false,
+    phase: '', // ROLL_WAIT / ROLL_AGAIN / ROLL_DONE
+    roll: {}, // { openid: { value, at } }
+    rollResult: null, // { p1, p2 }
+    blackOpenid: '',
+    whiteOpenid: '',
+    firstPlayerOpenid: '',
+    rollMe: null, // 我的点数
+    rollOpp: null, // 对手点数
+    rolledMe: false, // 是否已投骰子
+    rollDone: false, // 是否已完成投骰子
+    rollAnimating: false, // 投骰子动画中
+    rollDisplay: '请点击按钮投骰子', // 提示文字
+    // 骰子弹窗延迟关闭相关
+    showRollModal: false, // 控制弹窗显示（ROLL_DONE 后延迟关闭）
+    rollWinnerText: '', // 先手提示文字
   },
 
   onLoad(query) {
@@ -96,12 +117,13 @@ Page({
       if (query.mode === GameMode.PVP_ONLINE) {
         // 在线对战模式
         this.initOnlineGame(query);
+        // 在线对战模式：不在这里启动定时器，等待 phase === 'ROLL_DONE' 后再启动
       } else {
         this.initNewGame(query);
+        // 非在线对战模式：直接启动定时器
+        this.startTick();
       }
     }
-
-    this.startTick();
   },
 
   initNewGame(query) {
@@ -199,13 +221,72 @@ Page({
         // 读取游戏设置
         const settings = wx.getStorageSync('gameSettings') || {};
         
-        if (game.gameState) {
+        // 更新对手昵称：优先使用 games.player1/player2.nickName，只在缺失时才 fallback
+        const isOnlineMode = (game.gameState && game.gameState.config && game.gameState.config.mode === 'PVP_ONLINE') 
+          || this.data.modeLabel === '在线对战';
+        
+        if (isOnlineMode) {
+          const myOpenid = wx.getStorageSync('openid') || '';
+          let opponentNickName = '';
+          
+          if (myOpenid) {
+            // 确定对手的 openid
+            if (game.player1 && game.player1.openid === myOpenid) {
+              // 我是 player1，对手是 player2
+              opponentNickName = (game.player2 && game.player2.nickName && game.player2.nickName.trim()) 
+                ? game.player2.nickName 
+                : '';
+            } else if (game.player2 && game.player2.openid === myOpenid) {
+              // 我是 player2，对手是 player1
+              opponentNickName = (game.player1 && game.player1.nickName && game.player1.nickName.trim()) 
+                ? game.player1.nickName 
+                : '';
+            }
+          }
+          
+          // 只在有真实昵称时才更新，避免覆盖已有昵称
+          if (opponentNickName) {
+            this.setData({
+              opponentLabel: opponentNickName
+            });
+            console.log('[loadGameState] 更新对手昵称:', opponentNickName);
+          }
+        }
+        
+        // 更新 phase 相关状态
+        this.updatePhaseState(game);
+        
+        // 只有当 game.gameState.board 与 game.gameState.moves 都是数组时才 restoreState
+        if (game.gameState && 
+            typeof game.gameState === 'object' &&
+            game.gameState !== null &&
+            Array.isArray(game.gameState.board) && 
+            Array.isArray(game.gameState.moves)) {
           // 恢复游戏状态
-          core.restoreState(game.gameState);
-          const state = core.getState();
-          this.updateState(state);
+          try {
+            core.restoreState(game.gameState);
+            const state = core.getState();
+            this.updateState(state);
+          } catch (error) {
+            console.error('[loadGameState] apply remoteState 失败:', error);
+            console.error('[loadGameState] gameState 内容:', game.gameState);
+            wx.showToast({
+              title: '加载游戏状态失败',
+              icon: 'none',
+              duration: 2000
+            });
+          }
+          
+          // 初始化 lastStateVersion 和 lastStateKey
+          const stateVersion = game.stateVersion || 0;
+          const phase = (game.gameState && game.gameState.phase) || 'PLAYING';
+          const result = (game.gameState && game.gameState.result) || 'ONGOING';
+          this.setData({
+            lastStateVersion: stateVersion,
+            lastStateKey: `${stateVersion}|${phase}|${result}`
+          });
         } else {
-          // 初始化新游戏
+          // 否则 core.init(config) 初始化完整 state
           const config = {
             boardSize: 15,
             ruleSet: 'STANDARD',
@@ -260,36 +341,474 @@ Page({
     const db = wx.cloud.database();
     const watcher = db.collection('games').doc(this.data.gameId).watch({
       onChange: (snapshot) => {
-        if (snapshot.type === 'update' && snapshot.doc) {
-          const game = snapshot.doc;
-          if (game.gameState) {
-            // 检查是否是对方的落子
-            const remoteState = game.gameState;
-            const localState = core.getState();
+        console.log('[watchGameState] onChange, snapshot.type:', snapshot.type);
+        
+        // 无论 snapshot 是 update/init，都要先拿到最新 game 文档
+        let game = null;
+        if (snapshot.docs && snapshot.docs.length > 0) {
+          game = snapshot.docs[0];
+        } else if (snapshot.doc) {
+          game = snapshot.doc;
+        }
+        
+        if (!game) {
+          console.warn('[watchGameState] 无法获取 game 文档');
+          return;
+        }
+        
+        console.log('[watchGameState] 获取到 game 文档，phase:', game.phase, 'roll:', game.roll, 'stateVersion:', game.stateVersion);
+        
+        // 保存 turnOpenid 到 data（用于超时换手）
+        if (game.turnOpenid) {
+          this.setData({
+            turnOpenid: game.turnOpenid
+          });
+        }
+        
+        // 更新对手昵称：优先使用 games.player1/player2.nickName，只在缺失时才 fallback
+        // 判断是否为在线对战模式：通过 game.gameState.config.mode 或 this.data.modeLabel
+        const isOnlineMode = (game.gameState && game.gameState.config && game.gameState.config.mode === 'PVP_ONLINE') 
+          || this.data.modeLabel === '在线对战';
+        
+        if (isOnlineMode) {
+          const myOpenid = wx.getStorageSync('openid') || '';
+          let opponentNickName = '';
+          
+          if (myOpenid) {
+            // 确定对手的 openid
+            if (game.player1 && game.player1.openid === myOpenid) {
+              // 我是 player1，对手是 player2
+              // 优先使用 games.player2.nickName
+              opponentNickName = (game.player2 && game.player2.nickName && game.player2.nickName.trim()) 
+                ? game.player2.nickName 
+                : '';
+            } else if (game.player2 && game.player2.openid === myOpenid) {
+              // 我是 player2，对手是 player1
+              // 优先使用 games.player1.nickName
+              opponentNickName = (game.player1 && game.player1.nickName && game.player1.nickName.trim()) 
+                ? game.player1.nickName 
+                : '';
+            }
+          }
+          
+          // 只在有真实昵称时才更新，避免覆盖已有昵称
+          if (opponentNickName && opponentNickName !== this.data.opponentLabel) {
+            this.setData({
+              opponentLabel: opponentNickName
+            });
+            console.log('[watchGameState] 更新对手昵称:', opponentNickName);
+          }
+        }
+        
+        // 每次都调用 updatePhaseState(game)，用于更新投骰子 UI
+        this.updatePhaseState(game);
+        
+        // 如果 gameState 存在且有效，处理游戏状态（落子同步）
+        if (game.gameState && 
+            typeof game.gameState === 'object' &&
+            game.gameState !== null &&
+            Array.isArray(game.gameState.board) && 
+            Array.isArray(game.gameState.moves)) {
+          // 使用复合 key 进行幂等判断：${stateVersion}|${phase}|${result}
+          // 注意：phase 和 result 应该从 gameState 中获取，不是 game.phase（那是投骰子阶段）
+          const remoteStateVersion = game.stateVersion || 0;
+          const remotePhase = (game.gameState && game.gameState.phase) || 'PLAYING';
+          const remoteResult = (game.gameState && game.gameState.result) || 'ONGOING';
+          const remoteStateKey = `${remoteStateVersion}|${remotePhase}|${remoteResult}`;
+          const localStateKey = this.data.lastStateKey || '';
+          
+          // 如果状态 key 变化，说明有新的落子或状态变化（包括认输等）
+          if (remoteStateKey !== localStateKey) {
+            console.log('[watchGameState] 检测到状态变化，stateKey:', localStateKey, '->', remoteStateKey);
             
-            // 如果对方的moves数量更多，说明对方落子了
-            if (remoteState.moves.length > localState.moves.length) {
-              // 恢复远程状态
-              core.restoreState(remoteState);
+            // 记录恢复前的 moves 数量（用于判断是否是对方落子）
+            const localStateBefore = core.getState();
+            const movesBefore = localStateBefore.moves.length;
+            const resultBefore = localStateBefore.result;
+            
+            // 恢复远程状态（保证两端最终一致）
+            // 确保 gameState 有效后再调用 restoreState
+            try {
+              core.restoreState(game.gameState);
               const state = core.getState();
               this.updateState(state);
               
-              // 播放落子音效
-              if (this.data.enableSound) {
+              // 更新本地记录的状态 key
+              this.setData({
+                lastStateVersion: remoteStateVersion,
+                lastStateKey: remoteStateKey
+              });
+              
+              // 如果 turnOpenid 变化，重置超时防抖 key（允许新回合触发超时检测）
+              if (game.turnOpenid && game.turnOpenid !== this.data.turnOpenid) {
+                this.data._timeoutSentKey = '';
+                this.setData({
+                  turnOpenid: game.turnOpenid
+                });
+              }
+              
+              // 播放落子音效（如果确实是对方落子，即远程 moves 数量增加）
+              if (game.gameState.moves.length > movesBefore && this.data.enableSound) {
                 this.playSound('move');
               }
+              
+              // 恢复远程状态后，立刻检查是否需要跳转到结算页
+              this.maybeGotoResult(state);
+            } catch (error) {
+              // apply remoteState 失败
+              console.error('[watchGameState] apply remoteState 失败:', error);
+              console.error('[watchGameState] gameState 内容:', game.gameState);
+              wx.showToast({
+                title: '同步游戏状态失败',
+                icon: 'none',
+                duration: 2000
+              });
             }
+          }
+        } else {
+          // gameState 无效或为空，记录警告但不报错（可能是初始状态）
+          if (game.gameState === null || game.gameState === undefined) {
+            console.warn('[watchGameState] gameState 为 null/undefined，跳过状态同步');
+          } else {
+            console.warn('[watchGameState] gameState 结构异常，跳过状态同步:', {
+              hasGameState: !!game.gameState,
+              isObject: typeof game.gameState === 'object',
+              hasBoard: Array.isArray(game.gameState?.board),
+              hasMoves: Array.isArray(game.gameState?.moves)
+            });
           }
         }
       },
       onError: (error) => {
-        console.error('监听游戏状态失败:', error);
+        console.error('[watchGameState] 监听游戏状态失败:', error);
       }
     });
 
     this.setData({
       gameWatcher: watcher
     });
+  },
+
+  // 更新 phase 相关状态
+  async updatePhaseState(game) {
+    console.log('[updatePhaseState] 开始更新 phase 状态');
+    
+    // myOpenid 从 wx.getStorageSync('openid') 读取；为空则调用云函数获取
+    let myOpenid = wx.getStorageSync('openid') || '';
+    if (!myOpenid) {
+      console.log('[updatePhaseState] openid 为空，调用云函数获取');
+      try {
+        const result = await wx.cloud.callFunction({
+          name: 'quickstartFunctions',
+          data: {
+            type: 'getOpenId'
+          }
+        });
+        if (result.result && result.result.openid) {
+          myOpenid = result.result.openid;
+          wx.setStorageSync('openid', myOpenid);
+          console.log('[updatePhaseState] 获取到 openid 并写入 storage:', myOpenid);
+        } else {
+          // 如果 getOpenId 失败，尝试 login
+          const loginResult = await wx.cloud.callFunction({
+            name: 'quickstartFunctions',
+            data: {
+              type: 'login'
+            }
+          });
+          if (loginResult.result && loginResult.result.success && loginResult.result.data && loginResult.result.data.openid) {
+            myOpenid = loginResult.result.data.openid;
+            wx.setStorageSync('openid', myOpenid);
+            console.log('[updatePhaseState] 通过 login 获取到 openid 并写入 storage:', myOpenid);
+          }
+        }
+      } catch (error) {
+        console.error('[updatePhaseState] 获取 openid 失败:', error);
+      }
+    }
+    
+    if (!myOpenid) {
+      console.warn('[updatePhaseState] 无法获取 openid，跳过更新');
+      return;
+    }
+    
+    const phase = game.phase || 'ROLL_WAIT';
+    const roll = game.roll || {};
+    const rollResult = game.rollResult || null;
+    const blackOpenid = game.blackOpenid || '';
+    const whiteOpenid = game.whiteOpenid || '';
+    const firstPlayerOpenid = game.firstPlayerOpenid || '';
+    
+    // 记录之前的 phase，用于检测变化
+    const prevPhase = this.data.phase || '';
+    
+    // opponentOpenid 根据 game.player1.openid / game.player2.openid 计算
+    let opponentOpenid = '';
+    if (game.player1 && game.player1.openid === myOpenid) {
+      opponentOpenid = game.player2 ? (game.player2.openid || '') : '';
+    } else if (game.player1) {
+      opponentOpenid = game.player1.openid || '';
+    }
+    
+    // rollMe = game.roll?.[myOpenid]?.value || null，rollOpp = game.roll?.[opponentOpenid]?.value || null
+    const rollMe = roll[myOpenid] && typeof roll[myOpenid].value === 'number' ? roll[myOpenid].value : null;
+    const rollOpp = opponentOpenid && roll[opponentOpenid] && typeof roll[opponentOpenid].value === 'number' 
+      ? roll[opponentOpenid].value 
+      : null;
+    
+    const rolledMe = rollMe !== null;
+    
+    console.log('[updatePhaseState] 计算结果:', {
+      myOpenid: myOpenid,
+      opponentOpenid: opponentOpenid,
+      rollMe: rollMe,
+      rollOpp: rollOpp,
+      phase: phase
+    });
+    
+    // 根据 phase 设置提示文字
+    let rollDisplay = '请点击按钮投骰子';
+    if (phase === 'ROLL_AGAIN') {
+      rollDisplay = '点数相同，请重新投骰子';
+    } else if (phase === 'ROLL_DONE') {
+      rollDisplay = '投骰子完成，游戏开始';
+    } else if (rolledMe) {
+      rollDisplay = '等待对手投骰子';
+    }
+    
+    // 根据 blackOpenid/whiteOpenid 与 myOpenid 判定 myPlayer
+    let myPlayer = Player.Black;
+    if (blackOpenid && blackOpenid === myOpenid) {
+      myPlayer = Player.Black;
+    } else if (whiteOpenid && whiteOpenid === myOpenid) {
+      myPlayer = Player.White;
+    }
+    
+    // 骰子弹窗延迟关闭逻辑：ROLL_DONE 后显示双方点数和先手提示，延迟1~2秒关闭
+    // 生成当前 roll 的唯一 key（用于幂等判断）
+    const currentRollKey = `${rollMe || ''}_${rollOpp || ''}_${phase}`;
+    
+    // 如果 phase === 'ROLL_DONE' 且双方都已投完，显示弹窗并设置延迟关闭
+    if (phase === 'ROLL_DONE' && rollMe !== null && rollOpp !== null) {
+      // 生成先手提示文字
+      let rollWinnerText = '';
+      if (firstPlayerOpenid === myOpenid) {
+        rollWinnerText = '你先手（黑棋）';
+      } else if (firstPlayerOpenid === opponentOpenid) {
+        rollWinnerText = '对手先手（黑棋）';
+      } else {
+        rollWinnerText = '投骰子完成';
+      }
+      
+      // 幂等判断：如果 rollKey 变化了，才重新设置定时器
+      if (currentRollKey !== (this._lastRollKey || '')) {
+        // 清理旧的定时器
+        if (this._rollCloseTimer) {
+          clearTimeout(this._rollCloseTimer);
+          this._rollCloseTimer = null;
+        }
+        
+        // 显示弹窗
+        this.setData({
+          showRollModal: true,
+          rollWinnerText: rollWinnerText
+        });
+        
+        // 延迟1~2秒关闭（随机1.5秒左右）
+        const delay = 1000 + Math.random() * 1000; // 1000-2000ms
+        this._rollCloseTimer = setTimeout(() => {
+          this.setData({
+            showRollModal: false
+          });
+          this._rollCloseTimer = null;
+        }, delay);
+        
+        // 记录当前 rollKey
+        this._lastRollKey = currentRollKey;
+        
+        console.log('[updatePhaseState] ROLL_DONE 弹窗已显示，将在', delay, 'ms后关闭');
+      }
+    } else {
+      // 非 ROLL_DONE 或未完成投骰子，隐藏弹窗
+      if (this._rollCloseTimer) {
+        clearTimeout(this._rollCloseTimer);
+        this._rollCloseTimer = null;
+      }
+      if (this.data.showRollModal) {
+        this.setData({
+          showRollModal: false
+        });
+      }
+      this._lastRollKey = '';
+    }
+    
+    // 检查游戏是否已结束（基于 gameState.result，不是 games.phase）
+    // 如果游戏已结束，不应该显示投骰子界面
+    const gameEnded = game.gameState && 
+                      typeof game.gameState === 'object' &&
+                      game.gameState !== null &&
+                      game.gameState.result &&
+                      game.gameState.result !== 'ONGOING';
+    
+    // setData 更新 rollMe/rollOpp/phase
+    this.setData({
+      phase: phase,
+      roll: roll,
+      rollResult: rollResult,
+      blackOpenid: blackOpenid,
+      whiteOpenid: whiteOpenid,
+      firstPlayerOpenid: firstPlayerOpenid,
+      rollMe: rollMe,
+      rollOpp: rollOpp,
+      rolledMe: rolledMe,
+      rollDone: phase === 'ROLL_DONE',
+      // 如果游戏已结束，不显示投骰子界面（即使 games.phase 不是 ROLL_DONE）
+      showRollOverlay: gameEnded ? false : (phase !== 'ROLL_DONE'),
+      myPlayer: myPlayer,
+      rollDisplay: rollDisplay
+    });
+    
+    console.log('[updatePhaseState] setData 完成，phase:', phase, 'rollMe:', rollMe, 'rollOpp:', rollOpp, 'myPlayer:', myPlayer);
+    
+    // 检查 game.gameState 是否已终局（phase ENDED 或 result!=ONGOING）
+    // 如果已终局，updatePhaseState 只负责骰子 UI，不允许执行 core.init/restore/startTick/stopTick 等会覆盖对局 UI/跳转的逻辑
+    const gameStateEnded = game.gameState && 
+                           typeof game.gameState === 'object' &&
+                           game.gameState !== null &&
+                           (game.gameState.phase === GamePhase.Ended || 
+                            (game.gameState.result && game.gameState.result !== GameResult.Ongoing));
+    
+    if (gameStateEnded) {
+      console.log('[updatePhaseState] 游戏已终局，跳过定时器和状态恢复逻辑');
+      return; // 终局时只更新骰子 UI，不执行其他逻辑
+    }
+    
+    // 检测 phase 变化，控制定时器
+    // 在线对战在 phase !== 'ROLL_DONE' 时禁止 startTick（或立即 stopTick）
+    const state = core.getState();
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      if (phase !== 'ROLL_DONE') {
+        // 如果 phase 不是 ROLL_DONE，立即停止定时器
+        if (this.tickTimer) {
+          console.log('[updatePhaseState] phase 不是 ROLL_DONE，停止定时器');
+          this.stopTick();
+        }
+      } else {
+        // phase === 'ROLL_DONE' 时才启动定时器
+        if (prevPhase !== 'ROLL_DONE') {
+          console.log('[updatePhaseState] phase 变化：从非 ROLL_DONE -> ROLL_DONE，启动定时器');
+          // 如果 phase === 'ROLL_DONE' 且 gameState 存在，恢复状态
+          if (game.gameState && 
+              typeof game.gameState === 'object' &&
+              game.gameState !== null &&
+              Array.isArray(game.gameState.board) && 
+              Array.isArray(game.gameState.moves)) {
+            try {
+              core.restoreState(game.gameState);
+              const state = core.getState();
+              this.updateState(state);
+              // 恢复状态后检查是否需要跳转
+              this.maybeGotoResult(state);
+            } catch (error) {
+              console.error('[updatePhaseState] apply remoteState 失败:', error);
+              console.error('[updatePhaseState] gameState 内容:', game.gameState);
+            }
+          }
+          // 启动定时器
+          this.startTick();
+        }
+      }
+    }
+    
+    // 如果 phase === 'ROLL_DONE' 且 gameState 存在，恢复状态（首次加载或其他情况）
+    if (phase === 'ROLL_DONE' && game.gameState && 
+        typeof game.gameState === 'object' &&
+        game.gameState !== null &&
+        Array.isArray(game.gameState.board) && 
+        Array.isArray(game.gameState.moves)) {
+      const currentState = core.getState();
+      if (currentState.moves.length === 0 || currentState.moves.length < game.gameState.moves.length) {
+        try {
+          core.restoreState(game.gameState);
+          const state = core.getState();
+          this.updateState(state);
+          // 恢复状态后检查是否需要跳转
+          this.maybeGotoResult(state);
+        } catch (error) {
+          console.error('[updatePhaseState] apply remoteState 失败:', error);
+          console.error('[updatePhaseState] gameState 内容:', game.gameState);
+        }
+      }
+    }
+  },
+
+  // 点击投骰子按钮
+  async onTapRollDice() {
+    if (this.data.rollAnimating || this.data.rolledMe || this.data.rollDone) {
+      return;
+    }
+    
+    if (!this.data.gameId) {
+      wx.showToast({
+        title: '游戏ID错误',
+        icon: 'none'
+      });
+      return;
+    }
+    
+    this.setData({ rollAnimating: true });
+    
+    try {
+      const result = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'rollDice',
+          gameId: this.data.gameId
+        }
+      });
+      
+      if (result.result.success) {
+        const data = result.result.data;
+        // 更新本地状态
+        if (data.roll) {
+          const myOpenid = wx.getStorageSync('openid') || '';
+          if (data.roll[myOpenid] && typeof data.roll[myOpenid].value === 'number') {
+            this.setData({
+              rollMe: data.roll[myOpenid].value,
+              rolledMe: true
+            });
+          }
+        }
+        
+        // 如果 phase === 'ROLL_AGAIN'，提示重新投
+        if (data.phase === 'ROLL_AGAIN') {
+          wx.showToast({
+            title: '点数相同，请重新投骰子',
+            icon: 'none',
+            duration: 2000
+          });
+          // 重置状态，允许重新投
+          this.setData({
+            rolledMe: false,
+            rollMe: null,
+            rollOpp: null
+          });
+        }
+      } else {
+        wx.showToast({
+          title: result.result.errMsg || '投骰子失败',
+          icon: 'none'
+        });
+      }
+    } catch (error) {
+      console.error('投骰子失败:', error);
+      wx.showToast({
+        title: error.message || '投骰子失败',
+        icon: 'none'
+      });
+    } finally {
+      this.setData({ rollAnimating: false });
+    }
   },
 
   // 同步游戏状态到数据库
@@ -326,6 +845,12 @@ Page({
   onUnload() {
     this.stopTick();
     
+    // 清理骰子弹窗定时器
+    if (this._rollCloseTimer) {
+      clearTimeout(this._rollCloseTimer);
+      this._rollCloseTimer = null;
+    }
+    
     // 停止监听
     if (this.data.gameWatcher) {
       this.data.gameWatcher.close();
@@ -357,8 +882,17 @@ Page({
       this.tickTimer = 0;
     }
     
-    // 只在游戏进行中才启动定时器
     const state = core.getState();
+    
+    // 在线对战模式：增加 phase gate，只有当 phase === 'ROLL_DONE' 时才允许启动定时器
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      if (this.data.phase !== 'ROLL_DONE') {
+        console.log('[startTick] 在线对战：phase 不是 ROLL_DONE，不启动定时器，phase:', this.data.phase);
+        return;
+      }
+    }
+    
+    // 只在游戏进行中才启动定时器
     if (state.phase === GamePhase.Playing) {
       const timerId = setInterval(() => {
         const currentState = core.getState();
@@ -370,9 +904,27 @@ Page({
           }
           return;
         }
-        core.tick(1000);
+        
+        // 在线对战模式：检查 phase，如果不是 ROLL_DONE 则停止定时器
+        if (currentState.config.mode === GameMode.PVP_ONLINE) {
+          if (this.data.phase !== 'ROLL_DONE') {
+            console.log('[startTick] 在线对战：phase 不是 ROLL_DONE，停止定时器，phase:', this.data.phase);
+            clearInterval(timerId);
+            if (this.tickTimer === timerId) {
+              this.tickTimer = 0;
+            }
+            return;
+          }
+          // 在线模式：不调用 core.tick()，只触发 UI 更新（计时由云端同步）
+          // 通过 updateState 更新计时显示
+          this.updateState(currentState);
+        } else {
+          // 非在线模式：调用 core.tick() 进行本地自减
+          core.tick(1000);
+        }
       }, 1000);
       this.tickTimer = timerId;
+      console.log('[startTick] 定时器已启动');
     }
   },
 
@@ -424,26 +976,116 @@ Page({
     
     // 计算计时器显示
     let timerDisplay = '∞';
+    let remain = Infinity; // 用于超时检测
     if (state.config.timeLimitPerMove) {
-      if (state.timeState.currentMoveRemain !== undefined) {
-        timerDisplay = this.formatTime(state.timeState.currentMoveRemain);
+      if (state.config.mode === GameMode.PVP_ONLINE) {
+        // 在线模式：直接计算 remain = currentMoveRemain - (Date.now()-currentStartTs)/1000
+        if (state.timeState.currentMoveRemain !== undefined && state.timeState.currentStartTs !== undefined) {
+          const elapsed = (Date.now() - state.timeState.currentStartTs) / 1000;
+          remain = Math.max(0, state.timeState.currentMoveRemain - elapsed);
+          timerDisplay = this.formatTime(remain);
+        } else {
+          remain = state.config.timeLimitPerMove;
+          timerDisplay = this.formatTime(remain);
+        }
       } else {
-        timerDisplay = this.formatTime(state.config.timeLimitPerMove);
+        // 非在线模式：使用 currentMoveRemain（由 core.tick() 更新）
+        if (state.timeState.currentMoveRemain !== undefined) {
+          remain = state.timeState.currentMoveRemain;
+          timerDisplay = this.formatTime(remain);
+        } else {
+          remain = state.config.timeLimitPerMove;
+          timerDisplay = this.formatTime(remain);
+        }
       }
     } else if (state.config.timeLimitPerPlayer) {
-      timerDisplay = this.formatTime(
-        state.currentPlayer === Player.Black
-          ? state.timeState.blackRemain
-          : state.timeState.whiteRemain
-      );
+      remain = state.currentPlayer === Player.Black
+        ? state.timeState.blackRemain
+        : state.timeState.whiteRemain;
+      timerDisplay = this.formatTime(remain);
     }
     
-    console.log('updateState - timerDisplay:', timerDisplay, 'timeLimitPerMove:', state.config.timeLimitPerMove, 'currentMoveRemain:', state.timeState.currentMoveRemain);
+    console.log('updateState - timerDisplay:', timerDisplay, 'timeLimitPerMove:', state.config.timeLimitPerMove, 'currentMoveRemain:', state.timeState.currentMoveRemain, 'mode:', state.config.mode);
+    
+    // 在线对战模式：检测超时并自动换手
+    if (state.config.mode === GameMode.PVP_ONLINE && 
+        state.phase === GamePhase.Playing && 
+        state.result === GameResult.Ongoing &&
+        remain <= 0 && 
+        this.data.gameId && 
+        this.data.turnOpenid) {
+      // 幂等防抖：使用 ${stateVersion}|${turnOpenid} 作为 key
+      const stateVersion = this.data.lastStateVersion || 0;
+      const timeoutKey = `${stateVersion}|${this.data.turnOpenid}`;
+      
+      if (this.data._timeoutSentKey !== timeoutKey) {
+        console.log('[updateState] 检测到超时，调用 timeoutMove，key:', timeoutKey);
+        this.data._timeoutSentKey = timeoutKey;
+        
+        // 异步调用云函数，不阻塞 UI 更新
+        wx.cloud.callFunction({
+          name: 'quickstartFunctions',
+          data: {
+            type: 'timeoutMove',
+            gameId: this.data.gameId
+          }
+        }).then(result => {
+          if (result.result && result.result.success) {
+            console.log('[updateState] timeoutMove 成功，等待 watchGameState 同步');
+            // 不在这里修改本地状态，等待 watchGameState 同步
+            if (result.result.data && typeof result.result.data.newStateVersion === 'number') {
+              this.setData({
+                lastStateVersion: result.result.data.newStateVersion
+              });
+            }
+          } else {
+            const errMsg = result.result?.errMsg || '超时换手失败';
+            console.warn('[updateState] timeoutMove 失败:', errMsg);
+            // 如果是 "not timeout"，说明已经换手了，重置防抖 key
+            if (errMsg === 'not timeout') {
+              this.data._timeoutSentKey = '';
+            }
+          }
+        }).catch(error => {
+          console.error('[updateState] timeoutMove 调用异常:', error);
+          // 重置防抖 key，允许重试
+          this.data._timeoutSentKey = '';
+        });
+      }
+    }
     
     // 更新获胜的五子位置
     const winningPositions = state.winningPositions || [];
     if (winningPositions.length > 0) {
       console.log('updateState: 设置winningPositions:', winningPositions);
+    }
+    
+    // 在线对战模式：设置角色和回合相关变量
+    let myRoleText = '';
+    let opponentRoleText = '';
+    let canPlay = false;
+    let myColor = '';
+    
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      // 根据 myPlayer 设置角色文本
+      if (this.data.myPlayer === Player.Black) {
+        myRoleText = '黑棋';
+        opponentRoleText = '白棋';
+        myColor = Player.Black;
+      } else {
+        myRoleText = '白棋';
+        opponentRoleText = '黑棋';
+        myColor = Player.White;
+      }
+      
+      // canPlay: phase === 'ROLL_DONE' 且 currentPlayer === myPlayer
+      canPlay = this.data.phase === 'ROLL_DONE' && state.currentPlayer === this.data.myPlayer;
+    } else {
+      // 非在线对战模式：默认设置
+      myRoleText = state.currentPlayer === Player.Black ? '黑棋' : '白棋';
+      opponentRoleText = state.currentPlayer === Player.Black ? '白棋' : '黑棋';
+      canPlay = true;
+      myColor = state.currentPlayer;
     }
     
     this.setData({
@@ -452,8 +1094,46 @@ Page({
       prevLastMove: newLastMove, // 更新上一次的落子记录
       currentPlayer: state.currentPlayer,
       timerDisplay: timerDisplay,
-      winningPositions: winningPositions // 更新获胜的五子位置
+      winningPositions: winningPositions, // 更新获胜的五子位置
+      myRoleText: myRoleText,
+      opponentRoleText: opponentRoleText,
+      canPlay: canPlay,
+      myColor: myColor
     });
+  },
+
+  // 检查并跳转到结算页（统一终局跳转逻辑）
+  maybeGotoResult(state) {
+    // 仅基于 core.getState() 判断：state.phase==='ENDED' 或 state.result!=='ONGOING'
+    if (state.phase !== GamePhase.Ended && state.result === GameResult.Ongoing) {
+      return; // 游戏未结束，不跳转
+    }
+
+    // 在线模式才需要跳转
+    if (state.config.mode !== GameMode.PVP_ONLINE) {
+      return;
+    }
+
+    // 幂等防重复跳转
+    if (this._navigatedToResult) {
+      console.log('[maybeGotoResult] 已跳转过，跳过重复跳转');
+      return;
+    }
+
+    console.log('[maybeGotoResult] 检测到游戏结束，跳转到结算页，phase:', state.phase, 'result:', state.result);
+
+    // 标记已跳转
+    this._navigatedToResult = true;
+
+    // 停止监听和定时器
+    if (this.data.gameWatcher) {
+      this.data.gameWatcher.close();
+    }
+    this.stopTick();
+
+    // 使用 wx.redirectTo 跳转到结算页
+    // 调用 handleGameOver 处理跳转（复用逻辑，但使用 redirectTo 而不是 navigateTo）
+    this.handleGameOver(state);
   },
 
   async handleGameOver(state) {
@@ -572,24 +1252,27 @@ Page({
       `dedupeKey=${dedupeKey}`
     ].filter(p => p.split('=')[1] !== '').join('&');
     
+    // 在线模式使用 redirectTo，非在线模式使用 navigateTo
+    const jumpMethod = state.config.mode === GameMode.PVP_ONLINE ? wx.redirectTo : wx.navigateTo;
+    
     // 使用延迟确保所有状态更新完成后再跳转，避免跳转超时
     setTimeout(() => {
-      const navigateToResult = () => {
-        wx.navigateTo({ 
-          url: `/pages/result/index?${params}`,
-          success: () => {
-            console.log('跳转到结算页面成功');
-          },
-          fail: (err) => {
-            console.error('navigateTo 跳转失败，尝试使用 redirectTo:', err);
-            // 如果 navigateTo 失败，使用 redirectTo 作为备选方案
-            wx.redirectTo({
+      jumpMethod({ 
+        url: `/pages/result/index?${params}`,
+        success: () => {
+          console.log('跳转到结算页面成功');
+        },
+        fail: (err) => {
+          console.error('跳转失败:', err);
+          // 如果 redirectTo 失败，尝试 navigateTo 作为备选方案
+          if (state.config.mode === GameMode.PVP_ONLINE) {
+            wx.navigateTo({
               url: `/pages/result/index?${params}`,
               success: () => {
-                console.log('redirectTo 跳转成功');
+                console.log('navigateTo 跳转成功');
               },
               fail: (err2) => {
-                console.error('redirectTo 也失败:', err2);
+                console.error('navigateTo 也失败:', err2);
                 wx.showToast({
                   title: '跳转失败，请重试',
                   icon: 'none',
@@ -597,16 +1280,19 @@ Page({
                 });
               }
             });
+          } else {
+            wx.showToast({
+              title: '跳转失败，请重试',
+              icon: 'none',
+              duration: 2000
+            });
           }
-        });
-      };
-      
-      // 尝试跳转
-      navigateToResult();
+        }
+      });
     }, 100); // 延迟100ms确保状态更新完成
   },
 
-  handleCellTap(e) {
+  async handleCellTap(e) {
     // 检查游戏状态，确保游戏还在进行中
     const state = core.getState();
     if (state.phase !== GamePhase.Playing || state.result !== GameResult.Ongoing) {
@@ -614,8 +1300,19 @@ Page({
       return;
     }
     
-    // 在线对战模式：检查是否是自己的回合
+    // 在线对战模式：检查 phase 和回合
     if (state.config.mode === GameMode.PVP_ONLINE) {
+      // 如果 phase !== 'ROLL_DONE' 或 myPlayer 未确定，直接提示"请先投骰子决定先手"
+      if (this.data.phase !== 'ROLL_DONE' || !this.data.myPlayer) {
+        console.log('[handleCellTap] 在线对战：phase 不是 ROLL_DONE 或 myPlayer 未确定，phase:', this.data.phase, 'myPlayer:', this.data.myPlayer);
+        wx.showToast({
+          title: '请先投骰子决定先手',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      // 若 state.currentPlayer !== myPlayer 则提示"等待对方落子"
       if (state.currentPlayer !== this.data.myPlayer) {
         wx.showToast({
           title: '等待对方落子',
@@ -656,22 +1353,89 @@ Page({
     }
     
     try {
-      // 执行落子（这是同步调用，会立即执行）
-      core.handlePlayerMove(Number(x), Number(y));
-      
-      const stateAfterMove = core.getState();
-      const lastMove = stateAfterMove.moves[stateAfterMove.moves.length - 1];
-      
-      // 在线对战模式：同步游戏状态到数据库
+      // 在线对战模式：只上传坐标，由云函数原子更新
       if (state.config.mode === GameMode.PVP_ONLINE) {
-        this.syncGameState(stateAfterMove, lastMove).catch(err => {
-          console.error('同步游戏状态失败:', err);
-        });
+        // 调用 placeMove 云函数
+        try {
+          const result = await wx.cloud.callFunction({
+            name: 'quickstartFunctions',
+            data: {
+              type: 'placeMove',
+              gameId: this.data.gameId,
+              x: Number(x),
+              y: Number(y)
+            }
+          });
+          
+          // 检查云函数调用是否成功
+          if (!result || !result.result) {
+            throw new Error('云函数返回结构异常');
+          }
+          
+          if (result.result.success) {
+            // 在线模式：不在这里立即 restore，统一由 watchGameState 同步并 restore
+            // 这样可以避免时序问题，确保状态同步的一致性
+            // 只更新 stateVersion（如果返回了的话）
+            if (result.result.data && typeof result.result.data.stateVersion === 'number') {
+              this.setData({
+                lastStateVersion: result.result.data.stateVersion
+              });
+            }
+            
+            // 播放落子音效
+            if (this.data.enableSound) {
+              this.playSound('move');
+            }
+            
+            // 注意：状态同步由 watchGameState 负责，这里不调用 restoreState
+            console.log('[placeMove] 落子成功，等待 watchGameState 同步状态');
+          } else {
+            // 落子失败，显示错误提示
+            const errMsg = result.result.errMsg || '落子失败';
+            console.error('[placeMove] 云函数返回失败:', errMsg);
+            wx.showToast({
+              title: errMsg,
+              icon: 'none'
+            });
+            // 重置处理标志
+            if (state.config.mode === GameMode.PVE) {
+              this.isProcessingMoveSync = false;
+              this.setData({ isProcessingMove: false });
+            }
+            return;
+          }
+        } catch (error) {
+          // 云函数调用失败（网络错误、超时等）
+          console.error('[placeMove] 云函数调用失败:', error);
+          wx.showToast({
+            title: error.message || '落子失败，请检查网络',
+            icon: 'none'
+          });
+          // 重置处理标志
+          if (state.config.mode === GameMode.PVE) {
+            this.isProcessingMoveSync = false;
+            this.setData({ isProcessingMove: false });
+          }
+          return;
+        }
+      } else {
+        // 非在线对战模式：本地执行落子
+        // 执行落子（这是同步调用，会立即执行）
+        core.handlePlayerMove(Number(x), Number(y));
+        
+        const stateAfterMove = core.getState();
+        const lastMove = stateAfterMove.moves[stateAfterMove.moves.length - 1];
+        
+        // 播放落子音效
+        if (this.data.enableSound) {
+          this.playSound('move');
+        }
       }
       
       // 执行落子后，立即检查状态，确保标志不会被意外重置
       // 只在人机模式下处理标志
       if (state.config.mode === GameMode.PVE) {
+        const stateAfterMove = core.getState();
         if (stateAfterMove.currentPlayer === Player.White) {
           // 玩家已下完，当前轮到AI，保持标志为true，等待AI下完
           console.log('玩家已下完，等待AI落子，保持处理标志');
@@ -681,11 +1445,6 @@ Page({
           this.isProcessingMoveSync = false;
           this.setData({ isProcessingMove: false });
         }
-      }
-      
-      // 播放落子音效
-      if (this.data.enableSound) {
-        this.playSound('move');
       }
     } catch (error) {
       // 如果落子失败，立即重置标志（只在人机模式下）
@@ -744,8 +1503,73 @@ Page({
     core.handleUndo();
   },
 
-  handleResign() {
-    core.handleResign(this.data.currentPlayer);
+  async handleResign() {
+    const state = core.getState();
+    
+    // 在线对战模式：调用云函数认输
+    if (state.config.mode === GameMode.PVP_ONLINE) {
+      if (this.data.phase !== 'ROLL_DONE') {
+        wx.showToast({
+          title: '请先投骰子决定先手',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      if (!this.data.gameId) {
+        wx.showToast({
+          title: '游戏ID错误',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      try {
+        const result = await wx.cloud.callFunction({
+          name: 'quickstartFunctions',
+          data: {
+            type: 'resignGame',
+            gameId: this.data.gameId
+          }
+        });
+        
+        // 检查云函数调用是否成功
+        if (!result || !result.result) {
+          throw new Error('云函数返回结构异常');
+        }
+        
+        if (result.result.success) {
+          // 在线模式：不在这里立即 restore，统一由 watchGameState 同步并 restore
+          // 只更新 stateVersion（如果返回了的话）
+          if (result.result.data && typeof result.result.data.stateVersion === 'number') {
+            this.setData({
+              lastStateVersion: result.result.data.stateVersion
+            });
+          }
+          
+          // 注意：状态同步由 watchGameState 负责，这里不调用 restoreState
+          console.log('[handleResign] 认输成功，等待 watchGameState 同步状态');
+        } else {
+          // 认输失败，显示错误提示
+          const errMsg = result.result.errMsg || '认输失败';
+          console.error('[handleResign] 云函数返回失败:', errMsg);
+          wx.showToast({
+            title: errMsg,
+            icon: 'none'
+          });
+        }
+      } catch (error) {
+        // 云函数调用失败（网络错误、超时等）
+        console.error('[handleResign] 云函数调用失败:', error);
+        wx.showToast({
+          title: error.message || '认输失败，请检查网络',
+          icon: 'none'
+        });
+      }
+    } else {
+      // 非在线对战模式：本地处理认输
+      core.handleResign(this.data.currentPlayer);
+    }
   },
 
   backHome(e) {

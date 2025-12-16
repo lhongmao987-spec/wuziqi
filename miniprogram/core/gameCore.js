@@ -77,10 +77,14 @@ class GameCore {
     this.state = JSON.parse(JSON.stringify(state));
     
     // 如果游戏还在进行中，需要重新设置计时起点
+    // 注意：在线模式（PVP_ONLINE）不覆盖 timeState.currentStartTs，保持云端同步的时间锚点
     if (this.state.phase === GamePhase.Playing) {
-      this.state.timeState.currentStartTs = Date.now();
-      // 如果有每步计时，确保 currentMoveRemain 被正确初始化
-      if (this.state.config.timeLimitPerMove) {
+      if (this.state.config.mode !== GameMode.PVP_ONLINE) {
+        // 非在线模式：重新设置计时起点
+        this.state.timeState.currentStartTs = Date.now();
+      }
+      // 如果有每步计时，确保 currentMoveRemain 被正确初始化（仅非在线模式）
+      if (this.state.config.timeLimitPerMove && this.state.config.mode !== GameMode.PVP_ONLINE) {
         if (this.state.timeState.currentMoveRemain === undefined || this.state.timeState.currentMoveRemain <= 0) {
           this.state.timeState.currentMoveRemain = this.state.config.timeLimitPerMove;
         }
@@ -93,17 +97,24 @@ class GameCore {
 
   getState() {
     // 深拷贝，确保所有属性都被包含，特别是 winningPositions
+    // 对 board/moves/winningPositions 做强兜底，确保永远是数组
+    const board = Array.isArray(this.state.board) ? this.state.board.map(row => Array.isArray(row) ? [...row] : []) : [];
+    const moves = Array.isArray(this.state.moves) ? [...this.state.moves] : [];
+    const winningPositions = Array.isArray(this.state.winningPositions) 
+      ? this.state.winningPositions.map(p => ({ x: p.x, y: p.y })) 
+      : undefined;
+    
     const state = {
-      board: this.state.board.map(row => [...row]),
+      board: board,
       currentPlayer: this.state.currentPlayer,
-      moves: [...this.state.moves],
+      moves: moves,
       result: this.state.result,
       winner: this.state.winner,
       phase: this.state.phase,
       config: Object.assign({}, this.state.config),
       timeState: Object.assign({}, this.state.timeState),
       lastMove: this.state.lastMove ? Object.assign({}, this.state.lastMove) : undefined,
-      winningPositions: this.state.winningPositions ? this.state.winningPositions.map(p => ({ x: p.x, y: p.y })) : undefined
+      winningPositions: winningPositions
     };
     return state;
   }

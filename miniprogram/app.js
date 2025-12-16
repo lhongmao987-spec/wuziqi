@@ -15,6 +15,48 @@ App({
         env: this.globalData.env,
         traceUser: true,
       });
+      // 初始化完成后调用登录
+      this.ensureLogin();
+    }
+  },
+
+  // 确保登录：调用云函数 login，保存 openid 和 userInfo 到 storage
+  async ensureLogin() {
+    try {
+      // 检查是否已有 openid
+      const existingOpenid = wx.getStorageSync('openid');
+      if (existingOpenid) {
+        console.log('[ensureLogin] openid 已存在，跳过登录');
+        return;
+      }
+
+      console.log('[ensureLogin] 开始调用登录云函数');
+      const result = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'login'
+        }
+      });
+
+      if (result.result && result.result.success && result.result.data) {
+        const { openid, userInfo } = result.result.data;
+        
+        // 保存 openid
+        if (openid) {
+          wx.setStorageSync('openid', openid);
+          console.log('[ensureLogin] openid 已保存:', openid);
+        }
+        
+        // 保存 userInfo
+        if (userInfo) {
+          wx.setStorageSync('userInfo', userInfo);
+          console.log('[ensureLogin] userInfo 已保存');
+        }
+      } else {
+        console.error('[ensureLogin] 登录失败:', result.result);
+      }
+    } catch (error) {
+      console.error('[ensureLogin] 登录异常:', error);
     }
   },
 

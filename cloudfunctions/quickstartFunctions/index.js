@@ -10,6 +10,26 @@ const _ = db.command;
 const statsService = require('./services/statsService');
 const leaderboardService = require('./services/leaderboardService');
 const fixPlayer2Null = require('./fixPlayer2Null');
+
+// 引入规则引擎和类型
+const { RuleEngine } = require('./ruleEngine');
+const { Player, CellState, GameResult, GamePhase } = require('./types');
+
+// 检测 updateData 中是否存在以 'gameState.' 开头的 badKeys
+const checkUpdateDataForBadKeys = (updateData, type, branch = '') => {
+  const keys = Object.keys(updateData);
+  const badKeys = keys.filter(key => key.startsWith('gameState.'));
+  if (badKeys.length > 0) {
+    console.error(`[ERROR] 检测到 badKeys 在 ${type}${branch ? ` (${branch})` : ''}:`, {
+      badKeys: badKeys,
+      allKeys: keys,
+      updateData: JSON.stringify(updateData, null, 2)
+    });
+  } else {
+    console.log(`[OK] ${type}${branch ? ` (${branch})` : ''} updateData keys:`, keys);
+  }
+  return badKeys;
+};
 // 获取openid
 const getOpenId = async () => {
   // 获取基础信息
@@ -586,28 +606,45 @@ const joinRoom = async (event) => {
         };
       }
       
-      const room = roomRes.data[0];
+      // 过滤掉过期、playing/ended 的房间
+      const now = Date.now();
+      const validRooms = roomRes.data.filter(room => {
+        // 检查过期
+        const expireAt = room.expireAt;
+        const expireTime =
+          expireAt instanceof Date ? expireAt.getTime() :
+          typeof expireAt === 'number' ? expireAt :
+          expireAt ? new Date(expireAt).getTime() : null;
+        
+        if (expireTime && now > expireTime) {
+          return false; // 已过期
+        }
+        
+        // 检查状态
+        if (room.status === 'playing' || room.status === 'ended') {
+          return false; // 已开始或已结束
+        }
+        
+        return true; // 有效房间
+      });
       
-      // 过期检查：expireAt 若存的是 Date，直接比较；若是时间戳也可兼容
-      const expireAt = room.expireAt;
-      const expireTime =
-        expireAt instanceof Date ? expireAt.getTime() :
-        typeof expireAt === 'number' ? expireAt :
-        expireAt ? new Date(expireAt).getTime() : null;
-      
-      if (expireTime && Date.now() > expireTime) {
+      // 如果有效房间不止一条，报错
+      if (validRooms.length > 1) {
         return {
           success: false,
-          errMsg: '房间已过期'
+          errMsg: '房间号冲突，请房主重建'
         };
       }
       
-      if (room.status === 'playing' || room.status === 'ended') {
+      // 如果没有有效房间
+      if (validRooms.length === 0) {
         return {
           success: false,
-          errMsg: '房间已开始或已结束'
+          errMsg: '房间不存在或已过期'
         };
       }
+      
+      const room = validRooms[0];
       
       // 创建者自己点加入：直接返回
       if (room.creator && room.creator.openid === openid) {
@@ -641,12 +678,20 @@ const joinRoom = async (event) => {
           player2: {
             openid: openid,
             nickName: nickName,
-          avatarUrl: avatarUrl,
+            avatarUrl: avatarUrl,
             avatarFileId: avatarFileId || ''
           },
           status: 'ready',
           updatedAt: db.serverDate()
         }
+      });
+      
+      // 打印日志便于对照
+      console.log('[joinRoom updated]', {
+        roomId: room.roomId,
+        roomDocId: room._id,
+        openid: openid,
+        nickName: nickName
       });
       
       // 事务内再读一次返回最新房间
@@ -764,16 +809,68 @@ const updateRoomStatus = async (event) => {
     // 如果状态为playing，创建游戏记录
     if (status === 'playing') {
       const now = db.serverDate();
-      const initialGameState = {};
+      
+      // 初始化完整的 gameState（即使 phase 仍是 ROLL_WAIT，也先有 gameState 避免 PathNotViable）
+      const boardSize = 15;
+      const board = Array(boardSize).fill(null).map(() => 
+        Array(boardSize).fill(0) // CellState.Empty = 0
+      );
+      
+      const timeLimitPerMove = 60; // 在线对战默认每步60秒
+      const timeState = {
+        blackRemain: 0,
+        whiteRemain: 0,
+        currentStartTs: Date.now(),
+        currentMoveRemain: timeLimitPerMove
+      };
+      
+      const initialGameState = {
+        board: board, // 15x15 全0数组
+        currentPlayer: 'BLACK', // Player.Black（先手待定，投骰子后确定）
+        moves: [], // 空数组
+        result: 'ONGOING', // GameResult.Ongoing
+        winner: undefined,
+        phase: 'PLAYING', // GamePhase.Playing（对局阶段，不是骰子阶段）
+        config: {
+          boardSize: boardSize,
+          ruleSet: 'STANDARD',
+          enableForbidden: false,
+          allowUndo: false, // 在线对战不允许悔棋
+          mode: 'PVP_ONLINE',
+          timeLimitPerMove: timeLimitPerMove
+        },
+        timeState: timeState,
+        lastMove: undefined,
+        winningPositions: undefined
+      };
+      
+      // 快照昵称到 games 文档，避免游戏页只读 games 时没有昵称
+      const player1Data = {
+        ...room.creator,
+        nickName: room.creator.nickName || '' // 快照 nickName
+      };
+      const player2Data = room.player2 ? {
+        ...room.player2,
+        nickName: room.player2.nickName || '' // 快照 nickName
+      } : null;
+      
       const gameData = {
         roomId: room.roomId,
         roomDocId: roomDocId,
-        player1: room.creator,
-        player2: room.player2,
-        gameState: initialGameState,
+        player1: player1Data,
+        player2: player2Data,
+        gameState: initialGameState, // 直接写完整的空 gameState，避免 PathNotViable
         moves: [],
         result: 'ONGOING',
         winner: null,
+        phase: 'ROLL_WAIT', // 初始阶段：等待投骰子（但 gameState 已初始化）
+        roll: {},
+        rollResult: {}, // 使用空对象而不是 null，避免点语法更新失败
+        blackOpenid: '',
+        whiteOpenid: '',
+        firstPlayerOpenid: '',
+        turnOpenid: '', // 当前回合的 openid（ROLL_DONE 后初始化）
+        stateVersion: 0, // 状态版本号（用于幂等判断）
         startedAt: new Date(),
         endedAt: null,
         updatedAt: now
@@ -826,7 +923,7 @@ const leaveRoom = async (event) => {
     }
     
     const roomResult = await db.collection('rooms').doc(roomDocId).get();
-    if (roomResult.data.length === 0) {
+    if (!roomResult.data) {
       return {
         success: false,
         errMsg: '房间不存在'
@@ -938,6 +1035,9 @@ const updateGameState = async (event) => {
       }
     }
     
+    // 检测 updateData 中是否存在 badKeys
+    checkUpdateDataForBadKeys(updateData, 'updateGameState');
+    
     await db.collection('games').doc(gameId).update({
       data: updateData
     });
@@ -961,6 +1061,10 @@ const updateGameState = async (event) => {
 
 // 掷骰子决定先手
 const rollDice = async (event) => {
+  // 版本号：用于确认云函数代码已成功部署
+  const VERSION = 'v2.0.1-rollDice-fix-gameState';
+  console.log(`[rollDice] 版本号: ${VERSION}, gameId: ${event.gameId}`);
+  
   const wxContext = cloud.getWXContext();
   const openid = wxContext.OPENID;
   const gameId = event.gameId;
@@ -1007,14 +1111,16 @@ const rollDice = async (event) => {
       if (oppRoll && typeof oppRoll.value === 'number') {
         const p1Val = rollObj[p1] ? rollObj[p1].value : null;
         const p2Val = rollObj[p2] ? rollObj[p2].value : null;
-        const rollResult = { p1: p1Val, p2: p2Val };
+        // 整块写入 rollResult，不使用点语法
+        const newRollResult = { p1: p1Val, p2: p2Val };
         if (p1Val === p2Val) {
           updateData.roll = {};
-          updateData.rollResult = rollResult;
+          updateData.rollResult = newRollResult; // 整块写入
           updateData.phase = 'ROLL_AGAIN';
           updateData.blackOpenid = '';
           updateData.whiteOpenid = '';
           updateData.firstPlayerOpenid = '';
+          updateData.turnOpenid = '';
         } else {
           const firstPlayerOpenid = p1Val > p2Val ? p1 : p2;
           const secondOpenid = p1Val > p2Val ? p2 : p1;
@@ -1022,28 +1128,392 @@ const rollDice = async (event) => {
             [p1]: rollObj[p1],
             [p2]: rollObj[p2]
           };
-          updateData.rollResult = rollResult;
+          updateData.rollResult = newRollResult; // 整块写入
           updateData.blackOpenid = firstPlayerOpenid;
           updateData.whiteOpenid = secondOpenid;
           updateData.firstPlayerOpenid = firstPlayerOpenid;
           updateData.phase = 'ROLL_DONE';
-          if (game.gameState && game.gameState.config && game.gameState.config.mode === 'PVP_ONLINE') {
-            game.gameState.currentPlayer = 'BLACK';
-            if (game.gameState.timeState) {
-              const limit = game.gameState.config.timeLimitPerMove || 60;
-              game.gameState.timeState.currentMoveRemain = limit;
-              game.gameState.timeState.currentStartTs = Date.now();
-            }
-            updateData.gameState = game.gameState;
+          // 初始化 turnOpenid 为黑棋 openid
+          updateData.turnOpenid = firstPlayerOpenid;
+          // 初始化 stateVersion
+          updateData.stateVersion = 1;
+          
+          // 初始化完整的 gameState（如果为 null 或不存在）
+          // 必须整体写入 gameState 对象，不能使用子路径更新（如 gameState.board）
+          // gameState 结构必须与 core.restoreState 期望完全一致
+          if (!game.gameState || game.gameState === null || !game.gameState.board || !Array.isArray(game.gameState.board)) {
+            const boardSize = 15;
+            const board = Array(boardSize).fill(null).map(() => 
+              Array(boardSize).fill(0) // CellState.Empty = 0
+            );
+            
+            const timeLimitPerMove = 60; // 在线对战默认每步60秒
+            const timeState = {
+              blackRemain: 0,
+              whiteRemain: 0,
+              currentStartTs: Date.now(),
+              currentMoveRemain: timeLimitPerMove
+            };
+            
+            const initialGameState = {
+              board: board, // 15x15 全0数组
+              currentPlayer: 'BLACK', // Player.Black
+              moves: [], // 空数组
+              result: 'ONGOING', // GameResult.Ongoing
+              winner: undefined,
+              phase: 'PLAYING', // GamePhase.Playing（对局阶段，不是骰子阶段）
+              config: {
+                boardSize: boardSize,
+                ruleSet: 'STANDARD',
+                enableForbidden: false,
+                allowUndo: false, // 在线对战不允许悔棋
+                mode: 'PVP_ONLINE',
+                timeLimitPerMove: timeLimitPerMove
+              },
+              timeState: timeState,
+              lastMove: undefined,
+              winningPositions: undefined
+            };
+            
+            // 整体写入 gameState，不使用子路径
+            updateData.gameState = initialGameState;
+          } else {
+            // 如果 gameState 已存在，创建新对象并整体写入（避免直接修改原对象）
+            const existingGameState = game.gameState;
+            const limit = existingGameState.config && existingGameState.config.timeLimitPerMove 
+              ? existingGameState.config.timeLimitPerMove 
+              : 60;
+            
+            const updatedGameState = {
+              ...existingGameState,
+              currentPlayer: 'BLACK',
+              phase: 'PLAYING',
+              timeState: {
+                ...(existingGameState.timeState || {}),
+                currentMoveRemain: limit,
+                currentStartTs: Date.now()
+              }
+            };
+            
+            // 整体写入 gameState，不使用子路径
+            updateData.gameState = updatedGameState;
           }
         }
       }
+
+      // 检测 updateData 中是否存在 badKeys
+      checkUpdateDataForBadKeys(updateData, 'rollDice', `phase=${updateData.phase || 'UNKNOWN'}`);
 
       await gameRef.update({
         data: updateData
       });
       return { success: true, data: { roll: updateData.roll, rollResult: updateData.rollResult, phase: updateData.phase } };
     });
+    return res;
+  } catch (e) {
+    return { success: false, errMsg: e.message || e };
+  }
+};
+
+// 在线落子（原子更新，避免并发覆盖）
+const placeMove = async (event) => {
+  const wxContext = cloud.getWXContext();
+  const openid = wxContext.OPENID;
+  const gameId = event.gameId;
+  const x = event.x;
+  const y = event.y;
+  
+  if (!gameId || typeof x !== 'number' || typeof y !== 'number') {
+    return { success: false, errMsg: '参数不完整' };
+  }
+  
+  try {
+    const res = await db.runTransaction(async (transaction) => {
+      const gameRef = transaction.collection('games').doc(gameId);
+      const gameDoc = await gameRef.get();
+      const game = gameDoc.data;
+      
+      if (!game) {
+        return { success: false, errMsg: '游戏不存在' };
+      }
+      
+      // 校验权限
+      if (game.player1.openid !== openid && game.player2.openid !== openid) {
+        return { success: false, errMsg: '无权限操作' };
+      }
+      
+      // 校验 games.phase === 'ROLL_DONE'（骰子阶段）
+      if (game.phase !== 'ROLL_DONE') {
+        return { success: false, errMsg: '请先投骰子决定先手' };
+      }
+      
+      // 校验 turnOpenid === 当前 openid
+      if (game.turnOpenid !== openid) {
+        return { success: false, errMsg: '不是你的回合' };
+      }
+      
+      // 校验 gameState 存在且结构完整（必须与 core.restoreState 期望一致）
+      if (!game.gameState) {
+        return { success: false, errMsg: '游戏状态不存在，请重新投骰子' };
+      }
+      if (!Array.isArray(game.gameState.board)) {
+        return { success: false, errMsg: '游戏状态异常：board 不是数组' };
+      }
+      if (!Array.isArray(game.gameState.moves)) {
+        return { success: false, errMsg: '游戏状态异常：moves 不是数组' };
+      }
+      // 校验 gameState.phase === 'PLAYING'（对局阶段）
+      if (game.gameState.phase !== 'PLAYING') {
+        return { success: false, errMsg: '游戏未在进行中' };
+      }
+      
+      // 校验游戏是否已结束（顶层 result 检查）
+      if (game.result && game.result !== 'ONGOING') {
+        return { success: false, errMsg: '游戏已结束' };
+      }
+      
+      // 校验目标格为空
+      const board = game.gameState.board;
+      if (x < 0 || x >= board.length || y < 0 || y >= board[x].length) {
+        return { success: false, errMsg: '落子位置超出边界' };
+      }
+      if (board[x][y] !== CellState.Empty) {
+        return { success: false, errMsg: '该位置已有棋子' };
+      }
+      
+      // 确定当前玩家（根据 turnOpenid）
+      const currentPlayer = game.turnOpenid === game.blackOpenid ? Player.Black : Player.White;
+      const cellValue = currentPlayer === Player.Black ? CellState.Black : CellState.White;
+      
+      // 更新 board（注意：本项目棋盘坐标是 board[x][y]）
+      const newBoard = JSON.parse(JSON.stringify(board));
+      newBoard[x][y] = cellValue;
+      
+      // 创建新的 move
+      const newMove = {
+        x: x,
+        y: y,
+        player: currentPlayer,
+        timestamp: Date.now()
+      };
+      
+      // 使用 RuleEngine 进行胜负判定（与前端 GameCore.executeMove 同逻辑）
+      const ruleEngine = new RuleEngine();
+      const judgment = ruleEngine.applyMoveAndJudge(newBoard, newMove, game.gameState.config || {});
+      
+      // 更新 moves
+      const newMoves = [...(game.gameState.moves || []), newMove];
+      
+      // 切换 currentPlayer（如果游戏未结束）
+      const nextPlayer = currentPlayer === Player.Black ? Player.White : Player.Black;
+      
+      // 更新 timeState（重置计时）- 在线模式每次有效落子后重置
+      const timeLimitPerMove = (game.gameState.config && game.gameState.config.timeLimitPerMove) || 60;
+      const newTimeState = {
+        ...(game.gameState.timeState || {}),
+        currentStartTs: Date.now(), // 重置计时起点
+        currentMoveRemain: timeLimitPerMove // 重置每步计时
+      };
+      
+      // 根据胜负判定结果更新 gameState
+      let newGameState;
+      let updateData;
+      let finished = false;
+      
+      if (judgment.result !== GameResult.Ongoing) {
+        // 游戏结束
+        finished = true;
+        newGameState = {
+          board: newBoard,
+          currentPlayer: nextPlayer, // 虽然游戏结束，但保持状态一致性
+          moves: newMoves,
+          result: judgment.result,
+          winner: judgment.winner,
+          phase: GamePhase.Ended,
+          config: game.gameState.config || {},
+          timeState: newTimeState,
+          lastMove: newMove,
+          winningPositions: judgment.winningPositions || undefined
+        };
+        
+        // 切换 turnOpenid（虽然游戏结束，但保持状态一致性）
+        const opponentOpenid = game.turnOpenid === game.blackOpenid 
+          ? game.whiteOpenid 
+          : game.blackOpenid;
+        
+        updateData = {
+          gameState: newGameState,
+          turnOpenid: opponentOpenid,
+          result: judgment.result,
+          winner: judgment.winner || null,
+          endedAt: db.serverDate(),
+          stateVersion: _.inc(1),
+          updatedAt: db.serverDate()
+        };
+        
+        // 同时更新房间状态为ended
+        if (game.roomDocId) {
+          await transaction.collection('rooms').doc(game.roomDocId).update({
+            data: {
+              status: 'ended',
+              updatedAt: db.serverDate()
+            }
+          });
+        }
+      } else {
+        // 游戏继续
+        newGameState = {
+          board: newBoard,
+          currentPlayer: nextPlayer,
+          moves: newMoves,
+          result: GameResult.Ongoing,
+          winner: undefined,
+          phase: GamePhase.Playing,
+          config: game.gameState.config || {},
+          timeState: newTimeState,
+          lastMove: newMove,
+          winningPositions: undefined
+        };
+        
+        // 切换 turnOpenid 为对手 openid（根据 blackOpenid/whiteOpenid）
+        const opponentOpenid = game.turnOpenid === game.blackOpenid 
+          ? game.whiteOpenid 
+          : game.blackOpenid;
+        
+        updateData = {
+          gameState: newGameState,
+          turnOpenid: opponentOpenid,
+          stateVersion: _.inc(1),
+          updatedAt: db.serverDate()
+        };
+      }
+      
+      // 检测 updateData 中是否存在 badKeys
+      checkUpdateDataForBadKeys(updateData, 'placeMove');
+      
+      await gameRef.update({
+        data: updateData
+      });
+      
+      return { 
+        success: true, 
+        data: { 
+          gameState: newGameState,
+          stateVersion: (game.stateVersion || 0) + 1
+        } 
+      };
+    });
+    return res;
+  } catch (e) {
+    return { success: false, errMsg: e.message || e };
+  }
+};
+
+// 在线认输
+const resignGame = async (event) => {
+  const wxContext = cloud.getWXContext();
+  const openid = wxContext.OPENID;
+  const gameId = event.gameId;
+  
+  if (!gameId) {
+    return { success: false, errMsg: 'gameId 不能为空' };
+  }
+  
+  try {
+    const res = await db.runTransaction(async (transaction) => {
+      const gameRef = transaction.collection('games').doc(gameId);
+      const gameDoc = await gameRef.get();
+      const game = gameDoc.data;
+      
+      if (!game) {
+        return { success: false, errMsg: '游戏不存在' };
+      }
+      
+      // 校验权限
+      if (game.player1.openid !== openid && game.player2.openid !== openid) {
+        return { success: false, errMsg: '无权限操作' };
+      }
+      
+      // 校验 games.phase === 'ROLL_DONE'（骰子阶段）
+      if (game.phase !== 'ROLL_DONE') {
+        return { success: false, errMsg: '请先投骰子决定先手' };
+      }
+      
+      // 校验 gameState 存在且结构完整
+      if (!game.gameState) {
+        return { success: false, errMsg: '游戏状态不存在，请重新投骰子' };
+      }
+      if (!Array.isArray(game.gameState.board)) {
+        return { success: false, errMsg: '游戏状态异常：board 不是数组' };
+      }
+      if (!Array.isArray(game.gameState.moves)) {
+        return { success: false, errMsg: '游戏状态异常：moves 不是数组' };
+      }
+      // 校验 gameState.phase === 'PLAYING'（对局阶段）
+      if (game.gameState.phase !== 'PLAYING') {
+        return { success: false, errMsg: '游戏未在进行中' };
+      }
+      
+      // 确定认输的玩家和获胜者
+      const resigningPlayer = game.turnOpenid === game.blackOpenid ? 'BLACK' : 'WHITE';
+      const winner = resigningPlayer === 'BLACK' ? 'WHITE' : 'BLACK';
+      
+      // 更新 gameState
+      const newGameState = {
+        ...game.gameState,
+        result: 'RESIGN',
+        winner: winner,
+        phase: 'ENDED'
+      };
+      
+      // 更新数据
+      // 注意：games.phase 仅用于骰子阶段（ROLL_WAIT/ROLL_AGAIN/ROLL_DONE），终局只写到 games.gameState.phase/result
+      // 因此这里不更新 games.phase，保持为 'ROLL_DONE'
+      const updateData = {
+        gameState: newGameState,
+        result: 'RESIGN',
+        winner: winner,
+        // 不更新 games.phase，保持为 'ROLL_DONE'（骰子阶段已完成）
+        endedAt: db.serverDate(),
+        stateVersion: _.inc(1),
+        updatedAt: db.serverDate()
+      };
+      
+      // 检测 updateData 中是否存在 badKeys
+      checkUpdateDataForBadKeys(updateData, 'resignGame');
+      
+      // 同时更新房间状态为ended
+      if (game.roomDocId) {
+        await transaction.collection('rooms').doc(game.roomDocId).update({
+          data: {
+            status: 'ended',
+            updatedAt: db.serverDate()
+          }
+        });
+      }
+      
+      await gameRef.update({
+        data: updateData
+      });
+      
+      return { 
+        success: true, 
+        data: { 
+          gameState: newGameState,
+          stateVersion: (game.stateVersion || 0) + 1
+        } 
+      };
+    });
+    
+    // 终局入库（幂等，在事务外调用）
+    if (res.success && res.data && res.data.gameState) {
+      // 重新获取游戏数据用于 finalizeOnlineGame
+      const gameResult = await db.collection('games').doc(gameId).get();
+      if (gameResult.data) {
+        await finalizeOnlineGame(gameResult.data, res.data.gameState, gameId);
+      }
+    }
+    
     return res;
   } catch (e) {
     return { success: false, errMsg: e.message || e };
@@ -1070,17 +1540,131 @@ const forceSwitchTurn = async (event) => {
       }
       const nextPlayer = state.currentPlayer === 'BLACK' ? 'WHITE' : 'BLACK';
       const limit = (state.config && state.config.timeLimitPerMove) ? state.config.timeLimitPerMove : 60;
-      state.currentPlayer = nextPlayer;
-      state.timeState.currentMoveRemain = limit;
-      state.timeState.currentStartTs = Date.now();
-      await gameRef.update({
-        data: {
-          gameState: state,
-          updatedAt: db.serverDate()
+      
+      // 创建新的 gameState 对象，避免直接修改原对象
+      const newGameState = {
+        ...state,
+        currentPlayer: nextPlayer,
+        timeState: {
+          ...(state.timeState || {}),
+          currentMoveRemain: limit,
+          currentStartTs: Date.now()
         }
+      };
+      
+      const updateData = {
+        gameState: newGameState,
+        updatedAt: db.serverDate()
+      };
+      
+      // 检测 updateData 中是否存在 badKeys
+      checkUpdateDataForBadKeys(updateData, 'forceSwitchTurn');
+      
+      await gameRef.update({
+        data: updateData
       });
-      return { success: true, data: { gameState: state } };
+      return { success: true, data: { gameState: newGameState } };
     });
+    return res;
+  } catch (e) {
+    return { success: false, errMsg: e.message || e };
+  }
+};
+
+// 超时自动换手
+const timeoutMove = async (event) => {
+  const wxContext = cloud.getWXContext();
+  const openid = wxContext.OPENID;
+  const gameId = event.gameId;
+  
+  if (!gameId) {
+    return { success: false, errMsg: 'gameId 不能为空' };
+  }
+  
+  try {
+    const res = await db.runTransaction(async (transaction) => {
+      const gameRef = transaction.collection('games').doc(gameId);
+      const gameDoc = await gameRef.get();
+      const game = gameDoc.data;
+      
+      if (!game) {
+        return { success: false, errMsg: '游戏不存在' };
+      }
+      
+      // 校验 gameState 存在
+      if (!game.gameState) {
+        return { success: false, errMsg: '游戏状态不存在' };
+      }
+      
+      // 校验 phase === 'PLAYING'
+      if (game.gameState.phase !== GamePhase.Playing) {
+        return { success: false, errMsg: '游戏未在进行中' };
+      }
+      
+      // 校验 result === 'ONGOING'
+      if (game.gameState.result !== GameResult.Ongoing) {
+        return { success: false, errMsg: '游戏已结束' };
+      }
+      
+      // 校验超时：Date.now() - gameState.timeState.currentStartTs >= limit*1000
+      const limit = (game.gameState.config && game.gameState.config.timeLimitPerMove) || 60;
+      const currentStartTs = game.gameState.timeState && game.gameState.timeState.currentStartTs;
+      
+      if (!currentStartTs) {
+        return { success: false, errMsg: '计时状态异常' };
+      }
+      
+      const elapsed = Date.now() - currentStartTs;
+      const limitMs = limit * 1000;
+      
+      if (elapsed < limitMs) {
+        return { success: false, errMsg: 'not timeout' };
+      }
+      
+      // 已超时：切换 currentPlayer 与 turnOpenid 到对方
+      const nextPlayer = game.gameState.currentPlayer === Player.Black ? Player.White : Player.Black;
+      const opponentOpenid = game.turnOpenid === game.blackOpenid 
+        ? game.whiteOpenid 
+        : game.blackOpenid;
+      
+      // 重置 timeState
+      const newTimeState = {
+        ...(game.gameState.timeState || {}),
+        currentStartTs: Date.now(),
+        currentMoveRemain: limit
+      };
+      
+      // 创建新的 gameState
+      const newGameState = {
+        ...game.gameState,
+        currentPlayer: nextPlayer,
+        timeState: newTimeState
+      };
+      
+      // 更新数据
+      const updateData = {
+        gameState: newGameState,
+        turnOpenid: opponentOpenid,
+        stateVersion: _.inc(1),
+        updatedAt: db.serverDate()
+      };
+      
+      // 检测 updateData 中是否存在 badKeys
+      checkUpdateDataForBadKeys(updateData, 'timeoutMove');
+      
+      await gameRef.update({
+        data: updateData
+      });
+      
+      return { 
+        success: true, 
+        data: { 
+          gameState: newGameState,
+          newStateVersion: (game.stateVersion || 0) + 1
+        } 
+      };
+    });
+    
     return res;
   } catch (e) {
     return { success: false, errMsg: e.message || e };
@@ -1267,8 +1851,14 @@ exports.main = async (event, context) => {
       return await getGameState(event);
     case "rollDice":
       return await rollDice(event);
+    case "placeMove":
+      return await placeMove(event);
+    case "resignGame":
+      return await resignGame(event);
     case "forceSwitchTurn":
       return await forceSwitchTurn(event);
+    case "timeoutMove":
+      return await timeoutMove(event);
     case "fixPlayer2Null":
       return await fixPlayer2Null();
     default:
