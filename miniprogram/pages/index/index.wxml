@@ -61,26 +61,38 @@
   </view>
 
   <!-- 加入房间弹窗 -->
-  <view wx:if="{{showJoinModal}}" class="modal-overlay" bindtap="hideJoinRoomModal">
+  <view
+    wx:if="{{showJoinModal}}"
+    class="modal-overlay {{modalPosition}}"
+    style="{{modalPosition === 'bottom' ? 'padding-bottom:' + modalBottom + 'px;' : ''}}"
+    catchtouchmove="true"
+    bindtap="hideJoinRoomModal"
+  >
     <view class="modal-content" catchtap="stopPropagation">
       <view class="modal-header">
         <view class="modal-title">输入房间号</view>
         <view class="modal-close" bindtap="hideJoinRoomModal">×</view>
       </view>
+
       <view class="modal-body">
-        <input 
-          class="room-input" 
-          type="number" 
+        <input
+          class="room-input"
+          type="number"
           placeholder="请输入4位房间号"
           maxlength="4"
           value="{{roomIdInput}}"
           bindinput="onRoomIdInput"
+          adjust-position="false"
+          cursor-spacing="0"
+          confirm-type="done"
         />
       </view>
+
       <view class="modal-footer">
         <button class="modal-btn cancel" bindtap="hideJoinRoomModal">取消</button>
         <button class="modal-btn confirm" bindtap="joinRoom">加入</button>
       </view>
     </view>
   </view>
+
 </view>

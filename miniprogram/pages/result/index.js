@@ -20,6 +20,7 @@ Page({
     hasReported: false, // 防重复上报标记
     mode: '', // 游戏模式
     roomId: '', // 房间号（用于在线对战）
+    roomDocId: '', // 房间文档ID（用于在线对战，调用 leaveRoom 必需）
     gameId: '' // 游戏ID（用于在线对战）
   },
 
@@ -40,7 +41,17 @@ Page({
 
     const mode = query.mode || '';
     const roomId = query.roomId || '';
+    const roomDocId = query.roomDocId || wx.getStorageSync('currentRoomDocId') || '';
     const gameId = query.gameId || '';
+    
+    // 如果从 query 获取到 roomDocId，同时写入 storage 作为兜底
+    if (query.roomDocId) {
+      wx.setStorageSync('currentRoomDocId', query.roomDocId);
+    }
+    // 如果从 query 获取到 roomId，同时写入 storage 作为兜底
+    if (query.roomId) {
+      wx.setStorageSync('currentRoomId', query.roomId);
+    }
     
     this.setData({
       resultText: resultTextMap[result],
@@ -50,6 +61,7 @@ Page({
       badges,
       mode: mode,
       roomId: roomId,
+      roomDocId: roomDocId,
       gameId: gameId
     });
     
@@ -144,6 +156,8 @@ Page({
   // 在线对战再来一局
   async playAgainOnline() {
     const roomId = this.data.roomId;
+    const gameId = this.data.gameId;
+    
     if (!roomId) {
       wx.showToast({
         title: '房间信息缺失',
@@ -152,14 +166,40 @@ Page({
       return;
     }
     
+    // 生成 token：使用 gameId 或当前时间戳
+    const token = gameId || Date.now().toString();
+    
     try {
       wx.showLoading({ title: '准备中...' });
       
+      // 先获取房间信息，获取 roomDocId
+      const roomInfoResult = await wx.cloud.callFunction({
+        name: 'quickstartFunctions',
+        data: {
+          type: 'getRoomInfo',
+          roomId: roomId
+        }
+      });
+      
+      if (!roomInfoResult.result.success || !roomInfoResult.result.data) {
+        wx.hideLoading();
+        wx.showToast({
+          title: roomInfoResult.result.errMsg || '获取房间信息失败',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      const room = roomInfoResult.result.data;
+      const roomDocId = room._id;
+      
+      // 调用 rematchReady 云函数
       const result = await wx.cloud.callFunction({
         name: 'quickstartFunctions',
         data: {
-          type: 'resetRoomForNext',
-          roomId: roomId
+          type: 'rematchReady',
+          roomDocId: roomDocId,
+          token: token
         }
       });
       
@@ -172,14 +212,14 @@ Page({
         });
       } else {
         wx.showToast({
-          title: result.result.errMsg || '重置房间失败',
+          title: result.result.errMsg || '准备再来一局失败',
           icon: 'none'
         });
       }
     } catch (error) {
       wx.hideLoading();
       wx.showToast({
-        title: error.message || '重置房间失败',
+        title: error.message || '准备再来一局失败',
         icon: 'none'
       });
     }
@@ -204,7 +244,51 @@ Page({
     }
   },
 
-  backHome() {
+  async backHome() {
+    // 在线对战模式：必须调用 leaveRoom 退出房间
+    if (this.data.mode === 'PVP_ONLINE' && this.data.roomDocId) {
+      try {
+        wx.showLoading({ title: '退出中...' });
+        
+        // 调用 leaveRoom 云函数
+        const result = await wx.cloud.callFunction({
+          name: 'quickstartFunctions',
+          data: {
+            type: 'leaveRoom',
+            roomDocId: this.data.roomDocId
+          }
+        });
+        
+        wx.hideLoading();
+        
+        // 无论成功或失败，都清理本地缓存并跳转首页
+        // 清理房间相关缓存
+        wx.removeStorageSync('currentRoomDocId');
+        wx.removeStorageSync('currentRoomId');
+        // 清理游戏相关缓存（如果有）
+        wx.removeStorageSync('currentGameState_PVP_ONLINE');
+        
+        if (result.result && result.result.success) {
+          console.log('[backHome] 退出房间成功');
+        } else {
+          console.warn('[backHome] 退出房间失败，但继续跳转:', result.result?.errMsg || '未知错误');
+        }
+      } catch (error) {
+        wx.hideLoading();
+        console.error('[backHome] 调用 leaveRoom 失败，但继续跳转:', error);
+        
+        // 即使调用失败，也清理本地缓存
+        wx.removeStorageSync('currentRoomDocId');
+        wx.removeStorageSync('currentRoomId');
+        wx.removeStorageSync('currentGameState_PVP_ONLINE');
+      }
+    } else {
+      // 非在线对战模式：直接清理缓存
+      wx.removeStorageSync('currentRoomDocId');
+      wx.removeStorageSync('currentRoomId');
+    }
+    
+    // 跳转首页
     wx.reLaunch({ url: '/pages/index/index' });
   }
 });

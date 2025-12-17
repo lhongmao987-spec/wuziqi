@@ -213,10 +213,29 @@ page {
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1000;
+  display: flex;
+  justify-content: center;
+  /* 过渡动画 */
+  transition: padding-bottom 0.3s ease-out, padding-top 0.3s ease-out;
+}
+
+/* 无键盘时：垂直居中 */
+.modal-overlay.center {
+  align-items: center;
+}
+
+/* 有键盘时：贴底（键盘避让） */
+.modal-overlay.bottom {
+  align-items: flex-end;
+  /* padding-bottom 值通过内联样式动态设置：keyboardHeight + safeAreaBottom + gap */
+}
+
+/* 有键盘时：贴顶（上边界夹紧，避免被顶出屏幕） */
+.modal-overlay.top {
+  align-items: flex-start;
+  padding-top: 24px;
+  /* 固定顶部，避免弹窗被顶出屏幕导致输入框/数字被裁切 */
 }
 
 .modal-content {
@@ -226,6 +245,7 @@ page {
   max-width: 90%;
   overflow: hidden;
   box-sizing: border-box;
+  /* 禁止使用 transform，使用 flex 布局定位 */
 }
 
 .modal-header {
@@ -264,14 +284,16 @@ page {
   background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 12rpx;
-  padding: 32rpx 24rpx;
-  min-height: 88rpx;
+  /* 明确的尺寸设置，避免真机键盘弹出时文字被裁切 */
+  height: 88rpx;
+  line-height: 88rpx;
+  padding: 0 24rpx;
   color: #f1f5f9;
   font-size: 32rpx;
   text-align: center;
   letter-spacing: 8rpx;
   font-family: 'Courier New', monospace;
-  line-height: 1.5;
+  /* line-height 与 height 相等，确保文字垂直居中 */
 }
 
 .room-input::placeholder {

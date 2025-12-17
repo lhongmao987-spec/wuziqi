@@ -13,7 +13,13 @@ Page({
     ],
     timeOptions: ['不限时', '每方 5 分钟', '每方 10 分钟'],
     showJoinModal: false,
-    roomIdInput: ''
+    roomIdInput: '',
+    keyboardHeight: 0, // 键盘高度（px）
+    safeAreaBottom: 0, // 安全区域底部高度（px）
+    screenHeight: 0, // 屏幕高度（px）
+    modalHeight: 0, // 弹窗高度（px）
+    modalPosition: 'center', // 弹窗定位方式：'center' | 'bottom' | 'top'
+    modalBottom: 0 // 弹窗 bottom 值（px，仅在 modalPosition === 'bottom' 时使用）
   },
 
   selectPve() {
@@ -83,6 +89,146 @@ Page({
         confirmText: '知道了'
       });
     }
+    
+    // 初始化键盘监听
+    this.initKeyboardListener();
+  },
+
+  // 初始化键盘监听
+  initKeyboardListener() {
+    // 获取系统信息，计算安全区域底部高度和屏幕高度
+    try {
+      const systemInfo = wx.getSystemInfoSync();
+      const safeArea = systemInfo.safeArea;
+      const screenHeight = systemInfo.screenHeight;
+      // safeAreaBottom = 屏幕高度 - 安全区域底部
+      const safeAreaBottom = screenHeight - (safeArea ? safeArea.bottom : screenHeight);
+      
+      this.setData({
+        safeAreaBottom: safeAreaBottom || 0,
+        screenHeight: screenHeight || 0
+      });
+      
+      console.log('[initKeyboardListener] safeAreaBottom:', safeAreaBottom, 'px', 'screenHeight:', screenHeight, 'px');
+    } catch (error) {
+      console.error('[initKeyboardListener] 获取系统信息失败:', error);
+      this.setData({
+        safeAreaBottom: 0,
+        screenHeight: 0
+      });
+    }
+    
+    // 防止重复注册监听
+    if (this.keyboardHeightChangeHandler) {
+      wx.offKeyboardHeightChange(this.keyboardHeightChangeHandler);
+    }
+    
+    // 上一次的键盘高度（用于防抖）
+    let lastKeyboardHeight = this.data.keyboardHeight || 0;
+    
+    // 键盘高度变化监听（带防抖）
+    this.keyboardHeightChangeHandler = (res) => {
+      const keyboardHeight = res.height || 0;
+      const currentHeight = this.data.keyboardHeight || 0;
+      const heightDiff = Math.abs(keyboardHeight - lastKeyboardHeight);
+      
+      // 防抖：高度变化小于 2px 且当前 data 中的值已等于新值，不更新（避免抖动）
+      // 但如果是从 0 到非 0 或从非 0 到 0，即使变化小也要更新
+      const isZeroTransition = (currentHeight === 0 && keyboardHeight > 0) || 
+                               (currentHeight > 0 && keyboardHeight === 0);
+      
+      if (heightDiff < 2 && keyboardHeight === currentHeight && !isZeroTransition) {
+        return;
+      }
+      
+      lastKeyboardHeight = keyboardHeight;
+      
+      // 更新键盘高度并计算弹窗位置
+      this.setData({
+        keyboardHeight: keyboardHeight
+      }, () => {
+        // setData 回调后计算弹窗位置
+        this.updateModalPosition(keyboardHeight);
+      });
+      
+      console.log('[键盘高度变化]', keyboardHeight, 'px', 'safeAreaBottom:', this.data.safeAreaBottom, 'px');
+    };
+    
+    wx.onKeyboardHeightChange(this.keyboardHeightChangeHandler);
+  },
+
+  // 更新弹窗位置（键盘避让 + 上边界夹紧）
+  updateModalPosition(keyboardHeight) {
+    // 如果弹窗未显示，不计算
+    if (!this.data.showJoinModal) {
+      return;
+    }
+    
+    // 键盘收起时，恢复居中
+    if (keyboardHeight === 0) {
+      this.setData({
+        modalPosition: 'center'
+      });
+      return;
+    }
+    
+    // 获取弹窗高度（如果未获取过，先获取）
+    const modalHeight = this.data.modalHeight;
+    const screenHeight = this.data.screenHeight;
+    const safeAreaBottom = this.data.safeAreaBottom;
+    const gap = 16; // 安全间距（px）
+    const minTop = 24; // 最小顶部间距（px）
+    
+    // 如果弹窗高度未获取，先获取
+    if (modalHeight === 0 || screenHeight === 0) {
+      this.getModalHeight().then(() => {
+        // 获取到高度后重新计算
+        this.updateModalPosition(keyboardHeight);
+      });
+      return;
+    }
+    
+    // 默认使用 bottom 定位
+    const bottom = keyboardHeight + safeAreaBottom + gap;
+    const topIfBottom = screenHeight - bottom - modalHeight;
+    
+    // 如果使用 bottom 定位会导致弹窗顶部距离屏幕顶部小于 minTop，改用 top 定位
+    if (topIfBottom < minTop) {
+      this.setData({
+        modalPosition: 'top'
+      });
+      console.log('[updateModalPosition] 使用 top 定位，top:', minTop, 'px', 'topIfBottom:', topIfBottom, 'px');
+    } else {
+      this.setData({
+        modalPosition: 'bottom',
+        modalBottom: bottom
+      });
+      console.log('[updateModalPosition] 使用 bottom 定位，bottom:', bottom, 'px', 'topIfBottom:', topIfBottom, 'px');
+    }
+  },
+
+  // 获取弹窗高度
+  getModalHeight() {
+    return new Promise((resolve) => {
+      const query = wx.createSelectorQuery().in(this);
+      query.select('.modal-content').boundingClientRect((res) => {
+        if (res && res.height) {
+          this.setData({
+            modalHeight: res.height
+          });
+          console.log('[getModalHeight] 弹窗高度:', res.height, 'px');
+        }
+        resolve();
+      }).exec();
+    });
+  },
+
+  // 销毁键盘监听
+  destroyKeyboardListener() {
+    if (this.keyboardHeightChangeHandler) {
+      wx.offKeyboardHeightChange(this.keyboardHeightChangeHandler);
+      this.keyboardHeightChangeHandler = null;
+    }
   },
 
   // 创建房间
@@ -131,7 +277,13 @@ Page({
   showJoinRoomModal() {
     this.setData({
       showJoinModal: true,
-      roomIdInput: ''
+      roomIdInput: '',
+      modalPosition: 'center'
+    }, () => {
+      // 弹窗显示后，获取弹窗高度
+      setTimeout(() => {
+        this.getModalHeight();
+      }, 100);
     });
   },
 
@@ -139,7 +291,8 @@ Page({
   hideJoinRoomModal() {
     this.setData({
       showJoinModal: false,
-      roomIdInput: ''
+      roomIdInput: '',
+      modalPosition: 'center'
     });
   },
 
@@ -212,5 +365,15 @@ Page({
         icon: 'none'
       });
     }
+  },
+
+  onHide() {
+    // 页面隐藏时取消监听
+    this.destroyKeyboardListener();
+  },
+
+  onUnload() {
+    // 页面卸载时取消监听
+    this.destroyKeyboardListener();
   }
 });

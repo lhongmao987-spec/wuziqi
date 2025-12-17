@@ -7,12 +7,14 @@ Page({
     hasRedirected: false,
     canStart: false,
     roomStatus: 'waiting', // waiting / ready / playing / ended
+    // 统一使用 room.creator 和 room.player2 作为数据源
     creatorInfo: {
       openid: '',
       nickName: '',
-      avatarUrl: ''
+      avatarFileId: '',
+      avatarUrl: '' // 由 convertAvatars 填充
     },
-    player2Info: null,
+    player2Info: null, // { openid, nickName, avatarFileId, avatarUrl } 或 null
     statusText: '等待玩家加入...',
     roomWatcher: null,
     pollTimer: null,
@@ -75,30 +77,8 @@ Page({
   },
 
   onUnload() {
-    // 如果正在跳转到游戏页面，不调用 leaveRoom
-    if (this._navigatingToGame) {
-      console.log('[onUnload] 正在跳转到游戏页面，跳过 leaveRoom');
-      // 清理所有资源
-      if (this.data.roomWatcher) {
-        this.data.roomWatcher.close();
-        this.setData({ roomWatcher: null });
-      }
-      if (this.data.pollTimer) {
-        clearInterval(this.data.pollTimer);
-        this.setData({ pollTimer: null });
-      }
-      if (this.data.retryTimer) {
-        clearTimeout(this.data.retryTimer);
-        this.setData({ retryTimer: null });
-      }
-      return;
-    }
-    
     // 清理所有资源
-    if (this.data.roomWatcher) {
-      this.data.roomWatcher.close();
-      this.setData({ roomWatcher: null });
-    }
+    this.closeWatcher(); // 使用统一的关闭方法，确保幂等
     if (this.data.pollTimer) {
       clearInterval(this.data.pollTimer);
       this.setData({ pollTimer: null });
@@ -108,22 +88,26 @@ Page({
       this.setData({ retryTimer: null });
     }
     
-    // 调用云函数离开房间（静默调用，不显示 loading）
-    if (this.data.roomDocId) {
-      wx.cloud.callFunction({
-        name: 'quickstartFunctions',
-        data: {
-          type: 'leaveRoom',
-          roomDocId: this.data.roomDocId
-        },
-        success: (res) => {
-          console.log('[onUnload] 离开房间成功:', res.result);
-        },
-        fail: (err) => {
-          console.error('[onUnload] 离开房间失败:', err);
-          // 静默失败，不影响用户体验
-        }
-      });
+    // 重要：禁止在 onUnload 中无条件调用 leaveRoom
+    // 仅在用户主动点击"离开房间"按钮时调用 leaveRoom
+    // 这样可以避免：
+    // 1. 页面跳转时误触发离开房间
+    // 2. 页面被系统回收时误触发离开房间
+    // 3. 导致房间状态异常
+    console.log('[onUnload] 页面卸载，仅清理资源，不调用 leaveRoom');
+  },
+  
+  // 关闭 watcher（幂等：重复调用不报错）
+  closeWatcher() {
+    if (this.data.roomWatcher) {
+      try {
+        this.data.roomWatcher.close();
+        console.log('[closeWatcher] watcher 已关闭');
+      } catch (e) {
+        // 幂等：如果已经关闭，忽略错误
+        console.warn('[closeWatcher] 关闭 watcher 失败（可能已关闭）:', e);
+      }
+      this.setData({ roomWatcher: null });
     }
   },
 
@@ -187,7 +171,8 @@ Page({
     }
   },
 
-  // 更新房间数据
+  // 更新房间数据（统一使用 room.creator 和 room.player2 作为数据源）
+  // 注意：云函数已转换头像，直接使用 room.creator.avatarUrl 和 room.player2.avatarUrl
   updateRoomData(room) {
     // 严格判断是否是创建者：从 storage 获取 myOpenid
     const myOpenid = wx.getStorageSync('openid') || this.data.myOpenid || '';
@@ -198,18 +183,39 @@ Page({
     // 调试日志
     const isReady = room.status === 'ready';
     const hasPlayer2 = room.player2 && room.player2.openid && room.player2.openid.trim() !== '';
-    console.log('[updateRoomData] 判断条件', {
+    console.log('[updateRoomData] 房间数据更新', {
       roomId: room.roomId,
       myOpenid: myOpenid,
       creatorOpenid: room.creator ? room.creator.openid : null,
+      creatorNickName: room.creator ? room.creator.nickName : null,
+      creatorAvatarUrl: room.creator ? room.creator.avatarUrl : null,
       isCreator: isCreator,
       isReady: isReady,
       hasPlayer2: hasPlayer2,
-      player2Openid: room.player2 ? room.player2.openid : null
+      player2Openid: room.player2 ? room.player2.openid : null,
+      player2NickName: room.player2 ? room.player2.nickName : null,
+      player2AvatarUrl: room.player2 ? room.player2.avatarUrl : null
     });
     
+    // 状态文本
     let statusText = '等待玩家加入...';
-    if (room.status === 'ready') {
+    if (room.status === 'rematch_wait') {
+      // 再来一局等待状态
+      const rematch = room.rematch || { creatorReady: false, player2Ready: false };
+      if (isCreator) {
+        if (rematch.creatorReady && rematch.player2Ready) {
+          statusText = '双方已就绪，点击开始游戏';
+        } else {
+          statusText = '等待对手返回房间...';
+        }
+      } else {
+        if (rematch.creatorReady && rematch.player2Ready) {
+          statusText = '等待房主开始游戏...';
+        } else {
+          statusText = '等待对手返回房间...';
+        }
+      }
+    } else if (room.status === 'ready') {
       statusText = isCreator ? '双方已就绪，点击开始游戏' : '等待房主开始游戏...';
     } else if (room.status === 'playing') {
       statusText = '游戏进行中...';
@@ -217,57 +223,67 @@ Page({
       statusText = '游戏已结束';
     }
 
-    // 处理 player2Info：如果 player2 为空或没有 openid，设置为 null
-    let player2Info = null;
+    // 统一处理 creatorInfo：直接使用 room.creator（云函数已转换 avatarUrl）
+    const creatorInfo = room.creator ? {
+      openid: room.creator.openid || '',
+      nickName: room.creator.nickName || '玩家1',
+      avatarFileId: room.creator.avatarFileId || '',
+      avatarUrl: room.creator.avatarUrl || '' // 云函数已转换的 https URL
+    } : {
+      openid: '',
+      nickName: '玩家1',
+      avatarFileId: '',
+      avatarUrl: ''
+    };
+    
+    // 统一处理 player2Info：直接使用 room.player2（云函数已转换 avatarUrl）
+    let player2InfoData = null;
     if (room.player2 && room.player2.openid && room.player2.openid.trim() !== '') {
-      player2Info = room.player2;
+      player2InfoData = {
+        openid: room.player2.openid,
+        nickName: room.player2.nickName || '玩家2',
+        avatarFileId: room.player2.avatarFileId || '',
+        avatarUrl: room.player2.avatarUrl || '' // 云函数已转换的 https URL
+      };
     }
 
-    // 计算 canStart：房主 && 状态为 ready && player2 有 openid
-    const canStart = isCreator && isReady && hasPlayer2;
+    // 计算 canStart：
+    // 1. 必须是房主
+    // 2. 如果是 rematch_wait 状态，必须 creatorReady && player2Ready
+    // 3. 如果是 ready 状态，必须 player2 有 openid
+    let canStart = false;
+    if (isCreator) {
+      if (room.status === 'rematch_wait') {
+        const rematch = room.rematch || { creatorReady: false, player2Ready: false };
+        canStart = rematch.creatorReady && rematch.player2Ready;
+      } else if (room.status === 'ready') {
+        canStart = hasPlayer2;
+      }
+    }
 
-    // 处理 creatorInfo 和 player2Info（保留 avatarFileId 用于后续转换）
-    // 确保 avatarUrl 初始化为空字符串，等待 convertAvatars 转换
-    const creatorInfo = room.creator ? {
-      ...room.creator,
-      avatarUrl: '' // 初始化为空，等待转换
-    } : this.data.creatorInfo;
-    
-    const player2InfoData = player2Info ? {
-      ...player2Info,
-      avatarUrl: '' // 初始化为空，等待转换
-    } : null;
-
+    // 更新 UI 数据（直接使用云函数返回的 avatarUrl，无需客户端转换）
     this.setData({
-      roomId: room.roomId || this.data.roomId, // 确保房间号有值
+      roomId: room.roomId || this.data.roomId,
       roomDocId: room._id || this.data.roomDocId,
-      isCreator: isCreator, // 覆盖 isCreator
+      isCreator: isCreator,
       canStart: canStart,
       roomStatus: room.status,
       creatorInfo: creatorInfo,
       player2Info: player2InfoData,
-      statusText: statusText
+      statusText: statusText,
+      rematch: room.rematch || { creatorReady: false, player2Ready: false, token: '', updatedAt: null }
     }, () => {
-      // setData 回调，验证数据是否更新
-      console.log('[updateRoomData setData 后]', {
-        isCreator: this.data.isCreator,
-        canStart: this.data.canStart,
-        roomStatus: this.data.roomStatus,
+      // setData 回调：验证数据
+      console.log('[updateRoomData] setData 完成', {
+        creatorInfo: this.data.creatorInfo,
         player2Info: this.data.player2Info,
-        player2NickName: this.data.player2Info ? this.data.player2Info.nickName : null,
-        player2Openid: this.data.player2Info ? this.data.player2Info.openid : null,
-        creatorAvatarFileId: this.data.creatorInfo ? this.data.creatorInfo.avatarFileId : null,
-        player2AvatarFileId: this.data.player2Info ? this.data.player2Info.avatarFileId : null
+        creatorAvatarUrl: this.data.creatorInfo.avatarUrl,
+        player2AvatarUrl: this.data.player2Info ? this.data.player2Info.avatarUrl : null
       });
-      
-      // 异步转换头像：avatarFileId -> tempFileURL（带缓存）
-      // 使用 this.data 中的最新数据，确保 avatarFileId 正确传递
-      this.convertAvatars(this.data.creatorInfo, this.data.player2Info);
     });
 
     // 如果游戏已开始，跳转到游戏页面（只允许跳转一次）
     if (room.status === 'playing' && room.gameId && !this.data.hasRedirected) {
-      // 标记正在跳转到游戏页面
       this._navigatingToGame = true;
       this.setData({
         hasRedirected: true
@@ -278,211 +294,115 @@ Page({
     }
   },
 
-  // 转换头像：avatarFileId -> tempFileURL（带缓存）
-  async convertAvatars(creatorInfo, player2Info) {
-    // 初始化缓存（如果不存在）
-    if (!this.avatarUrlCache) {
-      this.avatarUrlCache = {};
-    }
-    
-    // 初始化失败标记（如果不存在），避免重复转换失败的文件
-    if (!this.avatarFailedCache) {
-      this.avatarFailedCache = {};
-    }
-    
-    const fileList = [];
-    const needConvert = {};
-    const updateData = {};
-    
-    // 默认头像 URL（使用空字符串表示使用占位符）
-    const defaultAvatarUrl = '';
-    
-    // 检查 creator 头像是否需要转换
-    if (creatorInfo) {
-      const fileId = creatorInfo.avatarFileId ? creatorInfo.avatarFileId.trim() : '';
-      if (!fileId) {
-        // fileId 为空，使用默认头像
-        if (!this.data.creatorInfo || this.data.creatorInfo.avatarUrl !== defaultAvatarUrl) {
-          updateData['creatorInfo.avatarUrl'] = defaultAvatarUrl;
-        }
-      } else if (this.avatarFailedCache[fileId]) {
-        // 之前转换失败过，使用默认头像
-        if (!this.data.creatorInfo || this.data.creatorInfo.avatarUrl !== defaultAvatarUrl) {
-          updateData['creatorInfo.avatarUrl'] = defaultAvatarUrl;
-        }
-      } else if (this.avatarUrlCache[fileId]) {
-        // 使用缓存
-        const cachedUrl = this.avatarUrlCache[fileId];
-        if (!this.data.creatorInfo || this.data.creatorInfo.avatarUrl !== cachedUrl) {
-          updateData['creatorInfo.avatarUrl'] = cachedUrl;
-          console.log('[convertAvatars] creator 使用缓存:', cachedUrl);
-        }
-      } else {
-        // 需要转换
-        fileList.push(fileId);
-        needConvert.creator = fileId;
-      }
-    }
-    
-    // 检查 player2 头像是否需要转换
-    if (player2Info) {
-      const fileId = player2Info.avatarFileId ? player2Info.avatarFileId.trim() : '';
-      if (!fileId) {
-        // fileId 为空，使用默认头像
-        if (!this.data.player2Info || this.data.player2Info.avatarUrl !== defaultAvatarUrl) {
-          updateData['player2Info.avatarUrl'] = defaultAvatarUrl;
-        }
-      } else if (this.avatarFailedCache[fileId]) {
-        // 之前转换失败过，使用默认头像
-        if (!this.data.player2Info || this.data.player2Info.avatarUrl !== defaultAvatarUrl) {
-          updateData['player2Info.avatarUrl'] = defaultAvatarUrl;
-        }
-      } else if (this.avatarUrlCache[fileId]) {
-        // 使用缓存
-        const cachedUrl = this.avatarUrlCache[fileId];
-        if (!this.data.player2Info || this.data.player2Info.avatarUrl !== cachedUrl) {
-          updateData['player2Info.avatarUrl'] = cachedUrl;
-          console.log('[convertAvatars] player2 使用缓存:', cachedUrl);
-        }
-      } else {
-        // 需要转换
-        fileList.push(fileId);
-        needConvert.player2 = fileId;
-      }
-    }
-    
-    // 先更新默认头像
-    if (Object.keys(updateData).length > 0) {
-      this.setData(updateData);
-    }
-    
-    // 如果没有需要转换的头像，直接返回
-    if (fileList.length === 0) {
-      return;
-    }
-    
-    try {
-      console.log('[convertAvatars] 开始转换头像，fileList:', fileList);
-      const result = await wx.cloud.getTempFileURL({
-        fileList: fileList
-      });
-      
-      const convertUpdateData = {};
-      
-      // 处理 creator 头像
-      if (needConvert.creator) {
-        const creatorFile = result.fileList.find(f => f.fileID === needConvert.creator);
-        if (creatorFile && creatorFile.tempFileURL) {
-          // 存入缓存
-          this.avatarUrlCache[needConvert.creator] = creatorFile.tempFileURL;
-          convertUpdateData['creatorInfo.avatarUrl'] = creatorFile.tempFileURL;
-          console.log('[convertAvatars] creator 转换成功:', creatorFile.tempFileURL);
-        } else {
-          // 转换失败，标记为失败，使用默认头像
-          this.avatarFailedCache[needConvert.creator] = true;
-          convertUpdateData['creatorInfo.avatarUrl'] = defaultAvatarUrl;
-          console.warn('[convertAvatars] creator 转换失败，使用默认头像:', needConvert.creator);
-        }
-      }
-      
-      // 处理 player2 头像
-      if (needConvert.player2) {
-        const player2File = result.fileList.find(f => f.fileID === needConvert.player2);
-        if (player2File && player2File.tempFileURL) {
-          // 存入缓存
-          this.avatarUrlCache[needConvert.player2] = player2File.tempFileURL;
-          convertUpdateData['player2Info.avatarUrl'] = player2File.tempFileURL;
-          console.log('[convertAvatars] player2 转换成功:', player2File.tempFileURL);
-        } else {
-          // 转换失败，标记为失败，使用默认头像
-          this.avatarFailedCache[needConvert.player2] = true;
-          convertUpdateData['player2Info.avatarUrl'] = defaultAvatarUrl;
-          console.warn('[convertAvatars] player2 转换失败，使用默认头像:', needConvert.player2);
-        }
-      }
-      
-      if (Object.keys(convertUpdateData).length > 0) {
-        this.setData(convertUpdateData);
-        console.log('[convertAvatars] 头像转换完成，updateData:', convertUpdateData);
-      }
-    } catch (error) {
-      console.error('[convertAvatars] 头像转换失败:', error);
-      // 转换失败，标记为失败，使用默认头像
-      const errorUpdateData = {};
-      if (needConvert.creator) {
-        this.avatarFailedCache[needConvert.creator] = true;
-        errorUpdateData['creatorInfo.avatarUrl'] = defaultAvatarUrl;
-      }
-      if (needConvert.player2) {
-        this.avatarFailedCache[needConvert.player2] = true;
-        errorUpdateData['player2Info.avatarUrl'] = defaultAvatarUrl;
-      }
-      if (Object.keys(errorUpdateData).length > 0) {
-        this.setData(errorUpdateData);
-      }
-    }
-  },
 
   // 监听房间状态变化
+  // 注意：watchRoom 从数据库直接获取数据，没有经过云函数转换头像
+  // 因此检测到变化时，通过 loadRoomInfo（云函数）重新获取完整数据（包括转换后的头像）
   watchRoom() {
     const roomDocId = this.data.roomDocId;
     if (!roomDocId) {
-      console.warn('roomDocId为空，无法监听房间');
+      console.warn('[watchRoom] roomDocId为空，无法监听房间');
       return;
     }
 
-    // 防重复创建：先关闭旧 watcher
-    if (this.data.roomWatcher) {
-      try {
-        this.data.roomWatcher.close();
-      } catch (e) {
-        console.warn('关闭旧 watcher 失败:', e);
-      }
-      this.setData({ roomWatcher: null });
-    }
+    // 防重复创建：先关闭旧 watcher（使用统一的关闭方法，确保幂等）
+    this.closeWatcher();
 
     try {
       const db = wx.cloud.database();
       const watcher = db.collection('rooms').doc(roomDocId).watch({
-      onChange: (snapshot) => {
-        // watch 成功时可选停止轮询（但轮询作为备用仍可保持）
-        // 这里不强制停止，让轮询和 watch 并行工作，提高可靠性
-        
-        let room = null;
-        
-        // 兼容 init/update，优先从 snapshot.docs[0] 取 room，没有再 fallback snapshot.doc
-        if (snapshot.docs && snapshot.docs.length > 0) {
-          room = snapshot.docs[0];
-        } else if (snapshot.doc) {
-          room = snapshot.doc;
+        onChange: (snapshot) => {
+          let room = null;
+          
+          // 兼容 init/update，优先从 snapshot.docs[0] 取 room，没有再 fallback snapshot.doc
+          if (snapshot.docs && snapshot.docs.length > 0) {
+            room = snapshot.docs[0];
+          } else if (snapshot.doc) {
+            room = snapshot.doc;
+          }
+          
+          // 处理房间被删除的情况
+          if (snapshot.type === 'remove' || !room) {
+            console.log('[watchRoom] 房间已删除或不存在');
+            // 关闭 watcher（使用统一的关闭方法，确保幂等）
+            this.closeWatcher();
+            // 停止轮询
+            if (this.data.pollTimer) {
+              clearInterval(this.data.pollTimer);
+              this.setData({ pollTimer: null });
+            }
+            // 提示并返回
+            wx.showToast({
+              title: '房间已解散',
+              icon: 'none'
+            });
+            setTimeout(() => {
+              wx.navigateBack();
+            }, 1500);
+            return;
+          }
+          
+          // 检查房间是否处于非法状态（creator 为空但 room 仍存在）
+          if (!room.creator || !room.creator.openid || room.creator.openid.trim() === '') {
+            console.warn('[watchRoom] 房间处于非法状态：creator 为空');
+            // 关闭 watcher（使用统一的关闭方法，确保幂等）
+            this.closeWatcher();
+            // 停止轮询
+            if (this.data.pollTimer) {
+              clearInterval(this.data.pollTimer);
+              this.setData({ pollTimer: null });
+            }
+            // 提示并返回
+            wx.showToast({
+              title: '房间状态异常',
+              icon: 'none'
+            });
+            setTimeout(() => {
+              wx.navigateBack();
+            }, 1500);
+            return;
+          }
+          
+          if (snapshot.type === 'init' || snapshot.type === 'update') {
+            console.log('[watchRoom] 房间数据变化:', {
+              type: snapshot.type,
+              roomId: room.roomId,
+              status: room.status,
+              hasCreator: !!room.creator,
+              hasPlayer2: !!room.player2
+            });
+            
+            // 重要：watchRoom 返回的数据没有经过云函数转换头像
+            // 因此通过 loadRoomInfo（云函数）重新获取完整数据（包括转换后的头像）
+            // 这样可以确保头像始终通过云函数获取，与排行榜逻辑一致
+            this.loadRoomInfo(false, false); // 不显示 loading，不自动启动 watch（避免重复）
+          }
+        },
+        onError: (error) => {
+          console.error('[watchRoom] 监听失败:', error);
+          // 关闭失败的 watcher（幂等）
+          this.closeWatcher();
+          // 立即降级为轮询
+          this.startPolling();
+          // 2s 后重试 watch
+          this.retryWatch();
         }
-        
-        if (room && (snapshot.type === 'init' || snapshot.type === 'update')) {
-          this.updateRoomData(room);
-        } else if (snapshot.type === 'remove') {
-          wx.showToast({
-            title: '房间已解散',
-            icon: 'none'
-          });
-          setTimeout(() => {
-            wx.navigateBack();
-          }, 1500);
-        }
-      },
-      onError: (error) => {
-        console.error('监听房间失败:', error);
-        // 立即降级为轮询
-        this.startPolling();
-        // 2s 后重试 watch
-        this.retryWatch();
-      }
-    });
+      });
 
-    this.setData({
-      roomWatcher: watcher
-    });
+      // 确保只存在一个 watcher：如果设置时发现已有 watcher，先关闭旧的
+      if (this.data.roomWatcher) {
+        console.warn('[watchRoom] 检测到已有 watcher，先关闭旧的');
+        this.closeWatcher();
+      }
+      
+      this.setData({
+        roomWatcher: watcher
+      });
+      console.log('[watchRoom] 监听已启动');
     } catch (error) {
-      console.error('启动房间监听失败:', error);
+      console.error('[watchRoom] 启动监听失败:', error);
+      // 关闭失败的 watcher（幂等）
+      this.closeWatcher();
       // 启动失败也降级为轮询
       this.startPolling();
       this.retryWatch();
@@ -531,8 +451,22 @@ Page({
 
   // 开始游戏
   async startGame() {
-    if (!this.data.isCreator || this.data.roomStatus !== 'ready') {
+    // 校验：必须是房主，且状态为 ready 或 rematch_wait
+    if (!this.data.isCreator || (this.data.roomStatus !== 'ready' && this.data.roomStatus !== 'rematch_wait')) {
       return;
+    }
+    
+    // 如果是 rematch_wait 状态，前端再次校验（云函数会强校验）
+    if (this.data.roomStatus === 'rematch_wait') {
+      const room = this.data;
+      const rematch = room.rematch || { creatorReady: false, player2Ready: false };
+      if (!rematch.creatorReady || !rematch.player2Ready) {
+        wx.showToast({
+          title: '等待对手返回房间...',
+          icon: 'none'
+        });
+        return;
+      }
     }
 
     try {

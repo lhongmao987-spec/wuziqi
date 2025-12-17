@@ -754,9 +754,67 @@ const getRoomInfo = async (event) => {
       };
     }
     
+    // 批量转换头像：avatarFileId -> https URL（与排行榜逻辑一致）
+    const fileIdsToConvert = [];
+    const avatarMapping = {}; // fileID -> tempFileURL 映射
+    
+    // 收集 creator 和 player2 的 avatarFileId
+    if (room.creator && room.creator.avatarFileId) {
+      const fileId = room.creator.avatarFileId.trim();
+      if (fileId) {
+        fileIdsToConvert.push(fileId);
+        avatarMapping.creator = fileId;
+      }
+    }
+    
+    if (room.player2 && room.player2.avatarFileId) {
+      const fileId = room.player2.avatarFileId.trim();
+      if (fileId) {
+        fileIdsToConvert.push(fileId);
+        avatarMapping.player2 = fileId;
+      }
+    }
+    
+    // 批量转换头像
+    let fileIdToUrlMap = {};
+    if (fileIdsToConvert.length > 0) {
+      try {
+        const tempFileURLResult = await cloud.getTempFileURL({
+          fileList: fileIdsToConvert
+        });
+        if (tempFileURLResult.fileList) {
+          tempFileURLResult.fileList.forEach(file => {
+            if (file.fileID && file.tempFileURL) {
+              fileIdToUrlMap[file.fileID] = file.tempFileURL;
+            }
+          });
+        }
+      } catch (e) {
+        console.error('[getRoomInfo] 批量转换头像失败:', e);
+        // 转换失败，不影响主流程，返回空字符串
+      }
+    }
+    
+    // 构建返回数据，添加转换后的 avatarUrl
+    const roomData = {
+      ...room,
+      creator: room.creator ? {
+        ...room.creator,
+        avatarUrl: avatarMapping.creator && fileIdToUrlMap[avatarMapping.creator]
+          ? fileIdToUrlMap[avatarMapping.creator]
+          : ''
+      } : room.creator,
+      player2: room.player2 ? {
+        ...room.player2,
+        avatarUrl: avatarMapping.player2 && fileIdToUrlMap[avatarMapping.player2]
+          ? fileIdToUrlMap[avatarMapping.player2]
+          : ''
+      } : room.player2
+    };
+    
     return {
       success: true,
-      data: room
+      data: roomData
     };
   } catch (e) {
     return {
@@ -798,12 +856,35 @@ const updateRoomStatus = async (event) => {
       };
     }
     
-    // 更新房间状态
-    await db.collection('rooms').doc(roomDocId).update({
-      data: {
-        status: status,
-        updatedAt: new Date()
+    // 如果状态为 playing 且当前状态为 rematch_wait，必须校验 rematch 状态
+    if (status === 'playing' && room.status === 'rematch_wait') {
+      // 必须 creatorReady && player2Ready 才允许开始
+      if (!room.rematch || !room.rematch.creatorReady || !room.rematch.player2Ready) {
+        return {
+          success: false,
+          errMsg: '双方尚未准备好，无法开始游戏'
+        };
       }
+    }
+    
+    // 更新房间状态
+    const updateData = {
+      status: status,
+      updatedAt: new Date()
+    };
+    
+    // 如果状态为 playing 且之前是 rematch_wait，清空 rematch
+    if (status === 'playing' && room.status === 'rematch_wait') {
+      updateData.rematch = {
+        creatorReady: false,
+        player2Ready: false,
+        token: '',
+        updatedAt: new Date()
+      };
+    }
+    
+    await db.collection('rooms').doc(roomDocId).update({
+      data: updateData
     });
     
     // 如果状态为playing，创建游戏记录
@@ -880,7 +961,7 @@ const updateRoomStatus = async (event) => {
         data: gameData
       });
       
-      // 更新房间的游戏ID
+      // 更新房间的游戏ID（rematch 已在上面清空）
       await db.collection('rooms').doc(roomDocId).update({
         data: {
           gameId: gameResult._id
@@ -909,6 +990,7 @@ const updateRoomStatus = async (event) => {
 };
 
 // 离开房间
+// 离开房间（重构：幂等性，确保事务原子性，避免房间进入非法状态）
 const leaveRoom = async (event) => {
   try {
     const wxContext = cloud.getWXContext();
@@ -922,12 +1004,15 @@ const leaveRoom = async (event) => {
       };
     }
     
-    // 先查询房间信息，判断是否需要查询 users
+    // 先查询房间信息，判断是否需要查询 users（在事务外）
     const roomResult = await db.collection('rooms').doc(roomDocId).get();
+    
+    // 幂等性：如果房间不存在，直接返回成功（避免 document not exist 错误）
     if (!roomResult.data) {
+      console.log('[leaveRoom] 房间不存在，幂等返回成功');
       return {
-        success: false,
-        errMsg: '房间不存在'
+        success: true,
+        data: { deleted: false, reason: 'room_not_exist' }
       };
     }
     
@@ -945,19 +1030,21 @@ const leaveRoom = async (event) => {
           userInfo = userResult.data[0];
         }
       } catch (e) {
-        console.warn('查询用户信息失败，使用房间中的信息:', e);
+        console.warn('[leaveRoom] 查询用户信息失败，使用房间中的信息:', e);
       }
     }
     
-    // 进入事务执行更新
+    // 进入事务执行更新（确保原子性）
     return await db.runTransaction(async (transaction) => {
       const roomsCol = transaction.collection('rooms');
       const roomDoc = await roomsCol.doc(roomDocId).get();
       
+      // 幂等性：事务中再次检查房间是否存在
       if (!roomDoc.data) {
+        console.log('[leaveRoom] 事务中房间不存在，幂等返回成功');
         return {
-          success: false,
-          errMsg: '房间不存在'
+          success: true,
+          data: { deleted: false, reason: 'room_not_exist_in_transaction' }
         };
       }
       
@@ -965,20 +1052,7 @@ const leaveRoom = async (event) => {
       
       // 如果是创建者离开
       if (currentRoom.creator && currentRoom.creator.openid === openid) {
-        // 禁止在 playing 状态时继承，且必须要求 gameId 为空才允许继承
-        const isPlaying = currentRoom.status === 'playing';
-        const hasGameId = currentRoom.gameId && currentRoom.gameId.trim() !== '';
-        
-        if (isPlaying || hasGameId) {
-          // 游戏进行中或已有 gameId，不允许继承，直接删除房间
-          await roomsCol.doc(roomDocId).remove();
-          return {
-            success: true,
-            data: { deleted: true, reason: 'playing_or_has_gameId' }
-          };
-        }
-        
-        // 如果 player2 还在，提升 player2 为 creator
+        // 如果 player2 存在，提升 player2 为 creator
         if (currentRoom.player2 && currentRoom.player2.openid && currentRoom.player2.openid.trim() !== '') {
           // 使用房间中的信息，如果查询到了 users 信息则优先使用
           let newCreator = {
@@ -994,7 +1068,7 @@ const leaveRoom = async (event) => {
             newCreator.avatarFileId = userInfo.avatarFileId || newCreator.avatarFileId;
           }
           
-          // 提升 player2 为 creator，清空 player2
+          // 提升 player2 为 creator，清空 player2，重置状态，清空所有可能导致旧局残留的字段
           await roomsCol.doc(roomDocId).update({
             data: {
               creator: newCreator,
@@ -1005,6 +1079,13 @@ const leaveRoom = async (event) => {
                 avatarFileId: ''
               },
               status: 'waiting',
+              gameId: null, // 清空 gameId，避免指向不存在的 game
+              rematch: {
+                creatorReady: false,
+                player2Ready: false,
+                token: '',
+                updatedAt: null
+              }, // 清空 rematch，避免指向不存在的状态
               updatedAt: db.serverDate()
             }
           });
@@ -1014,16 +1095,16 @@ const leaveRoom = async (event) => {
             data: { deleted: false, promoted: true }
           };
         } else {
-          // player2 不在，删除房间
+          // player2 不存在，直接删除房间
           await roomsCol.doc(roomDocId).remove();
           return {
             success: true,
-            data: { deleted: true }
+            data: { deleted: true, reason: 'no_player2' }
           };
         }
       }
       
-      // 如果是玩家2离开，清空玩家2信息，状态改为waiting
+      // 如果是玩家2离开，清空玩家2信息，状态改为 waiting，清空所有可能导致旧局残留的字段
       if (currentRoom.player2 && currentRoom.player2.openid === openid) {
         await roomsCol.doc(roomDocId).update({
           data: {
@@ -1034,6 +1115,13 @@ const leaveRoom = async (event) => {
               avatarFileId: ''
             },
             status: 'waiting',
+            gameId: null, // 清空 gameId
+            rematch: {
+              creatorReady: false,
+              player2Ready: false,
+              token: '',
+              updatedAt: null
+            }, // 清空 rematch
             updatedAt: db.serverDate()
           }
         });
@@ -1043,9 +1131,139 @@ const leaveRoom = async (event) => {
         };
       }
       
+      // 幂等性：如果调用者既不是 creator 也不是 player2，可能是重复调用，返回成功
+      // 但需要检查是否已经是空状态（避免误判）
+      const isNotMember = !(currentRoom.creator && currentRoom.creator.openid === openid) &&
+                          !(currentRoom.player2 && currentRoom.player2.openid === openid);
+      if (isNotMember) {
+        // 检查是否已经是空状态（player2 已清空）
+        const player2Empty = !currentRoom.player2 || !currentRoom.player2.openid || currentRoom.player2.openid.trim() === '';
+        if (player2Empty && openid !== currentRoom.creator?.openid) {
+          // 如果 player2 已清空且调用者不是 creator，说明已经离开过了，幂等返回成功
+          console.log('[leaveRoom] 调用者不是房间成员，但 player2 已清空，幂等返回成功');
+          return {
+            success: true,
+            data: { deleted: false, reason: 'already_left' }
+          };
+        }
+      }
+      
       return {
         success: false,
         errMsg: '你不是房间成员'
+      };
+    });
+  } catch (e) {
+    // 如果是 document not exist 错误，幂等返回成功
+    if (e.message && (e.message.includes('not exist') || e.message.includes('不存在'))) {
+      console.log('[leaveRoom] 捕获 document not exist 错误，幂等返回成功:', e.message);
+      return {
+        success: true,
+        data: { deleted: false, reason: 'room_not_exist_catch' }
+      };
+    }
+    return {
+      success: false,
+      errMsg: e.message || e
+    };
+  }
+};
+
+// 再来一局准备（新增：处理 rematch 状态）
+const rematchReady = async (event) => {
+  try {
+    const wxContext = cloud.getWXContext();
+    const openid = wxContext.OPENID;
+    const roomDocId = event.roomDocId;
+    const token = event.token; // 上一局的 gameId 或 endedAt，用于防重复点击
+    
+    if (!roomDocId || !token) {
+      return {
+        success: false,
+        errMsg: '参数不完整'
+      };
+    }
+    
+    // 查询房间信息
+    const roomResult = await db.collection('rooms').doc(roomDocId).get();
+    if (!roomResult.data) {
+      return {
+        success: false,
+        errMsg: '房间不存在'
+      };
+    }
+    
+    const room = roomResult.data;
+    
+    // 校验调用者必须是 creator 或 player2
+    const isCreator = room.creator && room.creator.openid === openid;
+    const isPlayer2 = room.player2 && room.player2.openid && room.player2.openid === openid;
+    
+    if (!isCreator && !isPlayer2) {
+      return {
+        success: false,
+        errMsg: '无权限操作'
+      };
+    }
+    
+    // 使用事务更新 rematch 状态
+    return await db.runTransaction(async transaction => {
+      const roomsCol = transaction.collection('rooms');
+      
+      // 重新获取房间数据（事务内）
+      const currentRoomDoc = await roomsCol.doc(roomDocId).get();
+      if (!currentRoomDoc.data) {
+        return {
+          success: false,
+          errMsg: '房间不存在'
+        };
+      }
+      
+      const currentRoom = currentRoomDoc.data;
+      
+      // 检查 token：如果 rematch.token 存在且不匹配，说明是旧结算页的请求，直接返回当前状态
+      if (currentRoom.rematch && currentRoom.rematch.token && currentRoom.rematch.token !== token) {
+        return {
+          success: true,
+          data: {
+            room: currentRoom,
+            message: 'token 不匹配，已返回当前房间状态'
+          }
+        };
+      }
+      
+      // 初始化或更新 rematch 状态
+      const rematch = currentRoom.rematch || {
+        creatorReady: false,
+        player2Ready: false,
+        token: token,
+        updatedAt: new Date()
+      };
+      
+      // 根据 openid 判断是 creator 还是 player2，设置对应的 ready 状态
+      if (isCreator) {
+        rematch.creatorReady = true;
+      } else if (isPlayer2) {
+        rematch.player2Ready = true;
+      }
+      
+      rematch.updatedAt = new Date();
+      
+      // 更新房间状态
+      await roomsCol.doc(roomDocId).update({
+        data: {
+          rematch: rematch,
+          status: 'rematch_wait',
+          updatedAt: db.serverDate()
+        }
+      });
+      
+      return {
+        success: true,
+        data: {
+          rematch: rematch,
+          status: 'rematch_wait'
+        }
       };
     });
   } catch (e) {
@@ -1056,7 +1274,7 @@ const leaveRoom = async (event) => {
   }
 };
 
-// 重置房间准备下一局
+// 重置房间准备下一局（保留原有逻辑，但不再用于再来一局）
 const resetRoomForNext = async (event) => {
   try {
     const wxContext = cloud.getWXContext();
@@ -2060,6 +2278,8 @@ exports.main = async (event, context) => {
       return await updateRoomStatus(event);
     case "leaveRoom":
       return await leaveRoom(event);
+    case "rematchReady":
+      return await rematchReady(event);
     case "resetRoomForNext":
       return await resetRoomForNext(event);
     case "updateGameState":

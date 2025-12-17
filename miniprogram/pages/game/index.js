@@ -1260,13 +1260,24 @@ Page({
       `dedupeKey=${dedupeKey}`
     ];
     
-    // 在线对战模式：传递 roomId 和 gameId
+    // 在线对战模式：传递 roomId、roomDocId 和 gameId
     if (state.config.mode === GameMode.PVP_ONLINE) {
       if (this.data.roomId) {
         params.push(`roomId=${this.data.roomId}`);
       }
+      if (this.data.roomDocId) {
+        params.push(`roomDocId=${this.data.roomDocId}`);
+      }
       if (this.data.gameId) {
         params.push(`gameId=${this.data.gameId}`);
+      }
+      
+      // 同时写入 storage 作为兜底
+      if (this.data.roomDocId) {
+        wx.setStorageSync('currentRoomDocId', this.data.roomDocId);
+      }
+      if (this.data.roomId) {
+        wx.setStorageSync('currentRoomId', this.data.roomId);
       }
     }
     

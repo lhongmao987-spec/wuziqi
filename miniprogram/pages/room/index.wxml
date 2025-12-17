@@ -44,9 +44,11 @@
     <!-- 操作按钮 -->
     <view class="actions-section">
       <button wx:if="{{isCreator}}" class="action-btn primary" disabled="{{!canStart}}" bindtap="startGame">
-        {{canStart ? '开始游戏' : '等待玩家加入...'}}
+        {{canStart ? '开始游戏' : (roomStatus === 'rematch_wait' ? '等待对手返回房间...' : '等待玩家加入...')}}
       </button>
-      <button wx:if="{{!isCreator}}" class="action-btn primary" disabled>等待房主开始...</button>
+      <button wx:if="{{!isCreator}}" class="action-btn primary" disabled>
+        {{roomStatus === 'rematch_wait' ? '等待对手返回房间...' : '等待房主开始...'}}
+      </button>
       <button class="action-btn secondary" bindtap="leaveRoom">离开房间</button>
     </view>
   </view>

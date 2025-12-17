@@ -186,7 +186,7 @@ class GameCore {
     if (this.state.phase !== GamePhase.Playing) return;
 
     const aiLevel = this.state.config.aiLevel || 'EASY';
-    const move = this.aiEngine.getNextMove(this.state.board, Player.White, aiLevel);
+    const move = this.aiEngine.getNextMove(this.state.board, Player.White, aiLevel, this.state.config);
     
     this.executeMove(move.x, move.y, Player.White);
   }
